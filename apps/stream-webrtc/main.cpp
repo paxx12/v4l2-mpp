@@ -28,6 +28,8 @@ static int g_debug = 0;
 static constexpr int PING_INTERVAL_MS = 1000;
 static constexpr int CONNECT_TIMEOUT_MS = 30000;
 static constexpr int PONG_TIMEOUT_MS = 30000;
+static constexpr int DEFAULT_SESSION_S = 60 * 60;
+static constexpr int MAX_SESSION_WITHOUT_TIMEOUT_S = 15 * 60;
 static constexpr int MIN_FRAME_SIZE = 64 * 1024;
 static constexpr int MAX_FRAME_SIZE = 2 * 1024 * 1024;
 
@@ -43,6 +45,7 @@ struct Client {
     std::chrono::steady_clock::time_point last_pong;
     std::vector<std::string> pending_candidates;
     bool answer_received = false;
+    bool keepAlive = false;
     int timeout_s = 0;
 };
 
@@ -196,9 +199,14 @@ static void ping_clients() {
 
         auto since_pong = std::chrono::duration_cast<std::chrono::milliseconds>(now - c->last_pong).count();
         if (since_pong >= PONG_TIMEOUT_MS) {
-            std::cerr << "Client " << c->id << " pong timeout" << std::endl;
-            c->pc->close();
-            continue;
+            if (c->keepAlive) {
+                std::cerr << "Client " << c->id << " pong timeout" << std::endl;
+                c->pc->close();
+                continue;
+            }
+
+            std::cerr << "Client " << c->id << " pong timeout, but keepAlive is false" << std::endl;
+            c->last_pong = now;
         }
 
         auto since_ping = std::chrono::duration_cast<std::chrono::milliseconds>(now - c->last_ping).count();
@@ -216,7 +224,7 @@ static size_t client_count() {
     return g_clients.size();
 }
 
-static std::shared_ptr<Client> create_client() {
+static std::shared_ptr<Client> create_client(const json& request) {
     auto client = std::make_shared<Client>();
     client->id = std::to_string(++g_client_counter);
     client->start_time = std::chrono::steady_clock::now();
@@ -266,6 +274,22 @@ static std::shared_ptr<Client> create_client() {
         }
     });
 
+    if (request.contains("timeout_s") && request["timeout_s"].is_number()) {
+        client->timeout_s = request["timeout_s"].get<int>();
+    }
+
+    if (client->timeout_s <= 0) {
+        client->timeout_s = DEFAULT_SESSION_S;
+    }
+
+    client->keepAlive = request.value("keepAlive", false);
+
+    if (!client->keepAlive && client->timeout_s > MAX_SESSION_WITHOUT_TIMEOUT_S) {
+        std::cerr << "Capping client timeout to " << MAX_SESSION_WITHOUT_TIMEOUT_S
+            << " seconds since keepAlive is false" << std::endl;
+        client->timeout_s = MAX_SESSION_WITHOUT_TIMEOUT_S;
+    }
+
     {
         std::lock_guard<std::mutex> lock(g_clients_mutex);
         g_clients.push_back(client);
@@ -282,10 +306,7 @@ static json handle_request(const json& request) {
             return {{"error", "max clients reached"}};
         }
 
-        auto client = create_client();
-        if (request.contains("timeout_s") && request["timeout_s"].is_number()) {
-            client->timeout_s = request["timeout_s"].get<int>();
-        }
+        auto client = create_client(request);
         client->pc->setLocalDescription();
 
         auto desc = client->pc->localDescription();
@@ -332,7 +353,7 @@ static json handle_request(const json& request) {
             return {{"error", "max clients reached"}};
         }
 
-        auto client = create_client();
+        auto client = create_client(request);
         client->pc->setRemoteDescription(rtc::Description(sdp, rtc::Description::Type::Offer));
         client->answer_received = true;
 
