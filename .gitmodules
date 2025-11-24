@@ -3,3 +3,7 @@
 	url = https://github.com/rockchip-linux/mpp.git
 	ignore = dirty
 
+[submodule "deps/libdatachannel"]
+	path = deps/libdatachannel
+	url = https://github.com/paullouisageneau/libdatachannel.git
+	ignore = dirty

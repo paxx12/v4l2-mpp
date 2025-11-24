@@ -1,0 +1,152 @@
+HTML_WEBRTC = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title></title>
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+  <style>
+    body {
+      margin:0;
+      padding:0;
+      background-color:#303030;
+    }
+
+    #streamStage {
+      position:fixed;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+    }
+
+    #streamStage:before {
+      content: '';
+      box-sizing: border-box;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 2rem;
+      height: 2rem;
+      margin-top: -1rem;
+      margin-left: -1rem;
+    }
+
+    #stream {
+      max-height: 100%;
+      max-width: 100%;
+      margin: auto;
+      position: absolute;
+      top: 0; left: 0; bottom: 0; right: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="streamtage">
+    <video controls autoplay muted playsinline id="stream"></video>
+  </div>
+
+  <script>
+    function startWebRTC() {
+        const iceServers = [
+          { urls: ['stun:stun.l.google.com:19302'] }
+        ];
+
+        var pc = null;
+
+        const urlSearchParams = new URLSearchParams(window.location.search);
+        const params = Object.fromEntries(urlSearchParams.entries());
+
+        const body = {
+          type: 'request',
+          res: params.res,
+          iceServers: iceServers,
+          keepAlive: true
+        };
+        if (params.timeout_s) {
+          body.timeout_s = parseInt(params.timeout_s, 10);
+        }
+
+        fetch(window.location.href, {
+          body: JSON.stringify(body),
+          headers: {
+              'Content-Type': 'application/json'
+          },
+          method: 'POST'
+        }).then(function(response) {
+          return response.json();
+        }).then(function(request) {
+          pc = new RTCPeerConnection({
+            sdpSemantics: 'unified-plan',
+            iceServers: request.iceServers
+          });
+
+          pc.addEventListener('datachannel', function(e) {
+            const dc = e.channel;
+            if (dc.label === 'keepalive') {
+              dc.addEventListener('message', function(e) {
+                dc.send('pong');
+              });
+            }
+          });
+
+          pc.remote_pc_id = request.id;
+          pc.addTransceiver('video', { direction: 'recvonly' });
+          pc.addEventListener('track', function(evt) {
+            if (document.getElementById('stream'))
+              document.getElementById('stream').srcObject = evt.streams[0];
+          });
+          pc.addEventListener("icecandidate", function(e) {
+            if (e.candidate) {
+              return fetch(window.location.href, {
+                body: JSON.stringify({
+                  type: 'remote_candidate',
+                  id: pc.remote_pc_id,
+                  candidates: [e.candidate]
+                }),
+                headers: { 'Content-Type': 'application/json' },
+                method: 'POST'
+              }).catch(function(e) {
+                console.log("Failed to send ICE WebRTC: "+e);
+              });
+            }
+          });
+
+          return pc.setRemoteDescription(request);
+        }).then(function() {
+          return pc.createAnswer();
+        }).then(function(answer) {
+          return pc.setLocalDescription(answer);
+        }).then(function() {
+          var offer = pc.localDescription;
+
+          return fetch(window.location.href, {
+            body: JSON.stringify({
+              type: offer.type,
+              id: pc.remote_pc_id,
+              sdp: offer.sdp,
+            }),
+            headers: { 'Content-Type': 'application/json' },
+            method: 'POST'
+          })
+        }).then(function(response) {
+          return response.json();
+        }).catch(function(e) {
+          console.log(e);
+        });
+    }
+
+    function stopWebRTC() {
+      setTimeout(function() {
+        pc.close();
+      }, 500);
+    }
+  </script>
+
+  <script>
+    window.onload = function() {
+      startWebRTC();
+    }
+  </script>
+</body>
+</html>
+"""

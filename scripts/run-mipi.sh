@@ -9,6 +9,11 @@ cleanup() {
 
 trap cleanup INT TERM EXIT
 
+RUNCMD="bash"
+if id -u lava &> /dev/null; then
+    RUNCMD="su lava"
+fi
+
 "$DIR/capture-mipi-mpp" \
     --device /dev/video11 --format nv12 \
     --jpeg-quality 7 \
@@ -17,13 +22,19 @@ trap cleanup INT TERM EXIT
     --h264-sock /tmp/capture-mipi-h264.sock &
 PIDS="$!"
 
-su lava -c "$DIR/stream-http.py \
-    --jpeg-sock /tmp/capture-mipi-jpeg.sock \
-    --mjpeg-sock /tmp/capture-mipi-mjpeg.sock \
-    --h264-sock /tmp/capture-mipi-h264.sock" &
+$RUNCMD -c "$DIR/stream-webrtc \
+    --h264-sock /tmp/capture-mipi-h264.sock \
+    --webrtc-sock /tmp/capture-mipi-webrtc.sock" &
 PIDS="$PIDS $!"
 
-su lava -c "$DIR/stream-snap-mqtt.py \
+$RUNCMD -c "$DIR/stream-http.py \
+    --jpeg-sock /tmp/capture-mipi-jpeg.sock \
+    --mjpeg-sock /tmp/capture-mipi-mjpeg.sock \
+    --h264-sock /tmp/capture-mipi-h264.sock \
+    --webrtc-sock /tmp/capture-mipi-webrtc.sock" &
+PIDS="$PIDS $!"
+
+$RUNCMD -c "$DIR/stream-snap-mqtt.py \
     --jpeg-sock /tmp/capture-mipi-jpeg.sock \
     --publish-dir /home/lava/printer_data/camera" &
 PIDS="$PIDS $!"

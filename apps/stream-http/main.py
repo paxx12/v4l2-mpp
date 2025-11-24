@@ -3,8 +3,13 @@
 import socket
 import argparse
 import time
+import json
 from urllib.parse import urlparse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+from html_index import HTML_INDEX
+from html_player import HTML_PLAYER
+from html_webrtc import HTML_WEBRTC
 
 def log(msg):
     ts = time.strftime('%H:%M:%S')
@@ -42,10 +47,30 @@ def read_jpeg_frames(sock_path, chunk_size=65536):
             yield buf[start:end + 2]
             buf = buf[end + 2:]
 
+def webrtc_request(sock_path, request):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(5.0)
+    try:
+        sock.connect(sock_path)
+        data = json.dumps(request) + '\n'
+        sock.sendall(data.encode())
+        response = b''
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            response += chunk
+            if b'\n' in response:
+                break
+        return json.loads(response.decode().strip())
+    finally:
+        sock.close()
+
 class CameraHandler(BaseHTTPRequestHandler):
     jpeg_sock = None
     mjpeg_sock = None
     h264_sock = None
+    webrtc_sock = None
 
     def log_message(self, format, *args):
         log(f"HTTP {self.address_string()} - {format % args}")
@@ -61,29 +86,38 @@ class CameraHandler(BaseHTTPRequestHandler):
             self.handle_h264_stream()
         elif path == '/player':
             self.handle_player()
+        elif path == '/webrtc':
+            self.handle_webrtc_player()
         elif path == '/':
             self.handle_index()
         else:
             self.send_error(404, 'Not Found')
         log(f"Request done: {self.path}")
 
-    def handle_index(self):
-        html = '''<!DOCTYPE html>
-<html>
-<head><title>Camera Stream</title></head>
-<body>
-<h1>Camera Stream</h1>
-<p><a href="snapshot.jpg">JPEG Snapshot</a></p>
-<p><a href="stream.mjpg">MJPEG Stream</a></p>
-<p><a href="stream.h264">H264 Stream (raw)</a></p>
-<p><a href="player">H264 Player</a></p>
-</body>
-</html>'''
+    def do_POST(self):
+        log(f"POST: {self.path} from {self.address_string()}")
+        path = urlparse(self.path).path
+        if path == '/webrtc':
+            self.handle_webrtc_offer()
+        else:
+            self.send_error(404, 'Not Found')
+        log(f"POST done: {self.path}")
+
+    def send_html(self, html):
         self.send_response(200)
         self.send_header('Content-Type', 'text/html')
         self.send_header('Content-Length', len(html))
         self.end_headers()
         self.wfile.write(html.encode())
+
+    def handle_webrtc_player(self):
+        if not self.webrtc_sock:
+            self.send_error(503, 'WebRTC not available')
+            return
+        self.send_html(HTML_WEBRTC)
+
+    def handle_index(self):
+        self.send_html(HTML_INDEX)
 
     def handle_snapshot(self):
         if not self.jpeg_sock:
@@ -156,90 +190,28 @@ class CameraHandler(BaseHTTPRequestHandler):
             log(f"H264 stream error: {e}")
 
     def handle_player(self):
-        html = '''<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Camera</title>
-<script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.5/dist/jmuxer.min.js"></script>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
-video, img { width: 100%; height: 100%; object-fit: contain; display: block; }
-#snapshot { display: none; }
-#fps { display: none; position: fixed; bottom: 10px; right: 10px; color: #fff; font: 14px monospace; background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px; }
-</style>
-</head>
-<body>
-<video id="player" muted autoplay playsinline></video>
-<img id="snapshot">
-<div id="fps"></div>
-<script>
-let jmuxer = null;
-let reader = null;
+        self.send_html(HTML_PLAYER)
 
-async function startH264() {
-    try {
-        jmuxer = new JMuxer({
-            node: 'player',
-            mode: 'video',
-            flushingTime: 0,
-            fps: 30,
-            debug: false
-        });
-
-        const response = await fetch('stream.h264');
-        if (!response.body || !response.body.getReader) {
-            throw new Error('Streaming not supported');
-        }
-        reader = response.body.getReader();
-
-        while (true) {
-            const {value, done} = await reader.read();
-            if (done) break;
-            jmuxer.feed({video: value});
-        }
-    } catch (e) {
-        fallbackToSnapshots();
-    }
-}
-
-function fallbackToSnapshots() {
-    if (reader) { reader.cancel().catch(() => {}); reader = null; }
-    if (jmuxer) { jmuxer.destroy(); jmuxer = null; }
-
-    document.getElementById('player').style.display = 'none';
-    const img = document.getElementById('snapshot');
-    const fpsEl = document.getElementById('fps');
-    img.style.display = 'block';
-    fpsEl.style.display = 'block';
-
-    let frameCount = 0;
-    let lastTime = performance.now();
-
-    img.onload = () => {
-        frameCount++;
-        const now = performance.now();
-        if (now - lastTime >= 1000) {
-            fpsEl.textContent = frameCount + ' fps';
-            frameCount = 0;
-            lastTime = now;
-        }
-        img.src = 'snapshot.jpg?t=' + Date.now();
-    };
-    img.onerror = () => { setTimeout(() => { img.src = 'snapshot.jpg?t=' + Date.now(); }, 200); };
-    img.src = 'snapshot.jpg?t=' + Date.now();
-}
-
-startH264();
-</script>
-</body>
-</html>'''
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html')
-        self.send_header('Content-Length', len(html))
+    def send_json_response(self, code, body):
+        data = json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(data))
         self.end_headers()
-        self.wfile.write(html.encode())
+        self.wfile.write(data)
+
+    def handle_webrtc_offer(self):
+        try:
+            if not self.webrtc_sock:
+                raise Exception('WebRTC not available')
+            content_length = int(self.headers.get('Content-Length', 0))
+            request_body = self.rfile.read(content_length).decode()
+            request = json.loads(request_body)
+            response = webrtc_request(self.webrtc_sock, request)
+            self.send_json_response(200, response)
+        except Exception as e:
+            log(f"WebRTC offer error: {e}")
+            self.send_json_response(500, {'error': str(e)})
 
 def main():
     parser = argparse.ArgumentParser(description='V4L2-MPP HTTP Server')
@@ -248,11 +220,13 @@ def main():
     parser.add_argument('--jpeg-sock', required=True, help='JPEG snapshot socket')
     parser.add_argument('--mjpeg-sock', required=True, help='MJPEG stream socket')
     parser.add_argument('--h264-sock', required=True, help='H264 stream socket')
+    parser.add_argument('--webrtc-sock', help='WebRTC signaling socket')
     args = parser.parse_args()
 
     CameraHandler.jpeg_sock = args.jpeg_sock
     CameraHandler.mjpeg_sock = args.mjpeg_sock
     CameraHandler.h264_sock = args.h264_sock
+    CameraHandler.webrtc_sock = args.webrtc_sock
 
     server = ThreadingHTTPServer((args.bind, args.port), CameraHandler)
     log(f"Server running on http://{args.bind}:{args.port}")
@@ -260,6 +234,9 @@ def main():
     log(f"  /stream.mjpg  - MJPEG stream")
     log(f"  /stream.h264  - H264 stream")
     log(f"  /player       - H264 player")
+    if args.webrtc_sock:
+        log(f"  /webrtc       - WebRTC player")
+        log(f"  POST /webrtc  - WebRTC offer")
 
     try:
         server.serve_forever()

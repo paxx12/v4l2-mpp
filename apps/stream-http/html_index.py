@@ -1,0 +1,13 @@
+HTML_INDEX = """<!DOCTYPE html>
+<html>
+<head><title>Camera Stream</title></head>
+<body>
+<h1>Camera Stream</h1>
+<p><a href="snapshot.jpg">JPEG Snapshot</a></p>
+<p><a href="stream.mjpg">MJPEG Stream</a></p>
+<p><a href="stream.h264">H264 Stream (raw)</a></p>
+<p><a href="player">H264 Player</a></p>
+<p><a href="webrtc">WebRTC Player</a></p>
+</body>
+</html>
+"""
