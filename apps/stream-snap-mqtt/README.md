@@ -1,4 +1,4 @@
-# stream-mqtt
+# stream-snap-mqtt
 
 Snapmaker U1 camera interface service.
 

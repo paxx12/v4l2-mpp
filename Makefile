@@ -1,4 +1,4 @@
-APPS = capture-usb-mpp capture-mipi-mpp stream-http stream-mqtt
+APPS = capture-usb-mpp capture-mipi-mpp stream-http stream-snap-mqtt
 APPS_DIR = apps
 
 .PHONY: all clean install uninstall $(APPS)

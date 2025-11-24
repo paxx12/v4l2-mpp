@@ -23,7 +23,7 @@ su lava -c "$DIR/stream-http.py \
     --h264-sock /tmp/capture-usb-h264.sock" &
 PIDS="$PIDS $!"
 
-su lava -c "$DIR/stream-mqtt.py \
+su lava -c "$DIR/stream-snap-mqtt.py \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
     --publish-dir /home/lava/printer_data/camera" &
 PIDS="$PIDS $!"
