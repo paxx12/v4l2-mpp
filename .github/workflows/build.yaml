@@ -30,6 +30,9 @@ jobs:
     - name: Compile libdatachannel
       run: ./deps/compile_libdatachannel.sh
 
+    - name: Compile livemedia
+      run: ./deps/compile_livemedia.sh
+
     - name: Build apps
       run: make
 

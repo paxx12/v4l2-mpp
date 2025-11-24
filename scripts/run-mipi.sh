@@ -39,5 +39,10 @@ $RUNCMD -c "$DIR/stream-snap-mqtt.py \
     --publish-dir /home/lava/printer_data/camera" &
 PIDS="$PIDS $!"
 
+$RUNCMD -c "$DIR/stream-rtsp \
+    --h264-sock /tmp/capture-mipi-h264.sock \
+    --rtsp-port 8554" &
+PIDS="$PIDS $!"
+
 wait -n
 echo "One of the processes has exited, cleaning up..."

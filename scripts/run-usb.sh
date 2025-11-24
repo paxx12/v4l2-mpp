@@ -34,6 +34,11 @@ $RUNCMD -c "$DIR/stream-http.py \
     --webrtc-sock /tmp/capture-usb-webrtc.sock" &
 PIDS="$PIDS $!"
 
+$RUNCMD -c "$DIR/stream-rtsp \
+    --h264-sock /tmp/capture-usb-h264.sock \
+    --rtsp-port 8555" &
+PIDS="$PIDS $!"
+
 $RUNCMD -c "$DIR/stream-snap-mqtt.py \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
     --publish-dir /home/lava/printer_data/camera" &
