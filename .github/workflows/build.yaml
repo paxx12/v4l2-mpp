@@ -27,6 +27,9 @@ jobs:
     - name: Compile MPP
       run: ./deps/compile_mpp.sh
 
+    - name: Compile libdatachannel
+      run: ./deps/compile_libdatachannel.sh
+
     - name: Build apps
       run: make
 

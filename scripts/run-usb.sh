@@ -9,6 +9,11 @@ cleanup() {
 
 trap cleanup INT TERM EXIT
 
+RUNCMD="bash"
+if id -u lava &> /dev/null; then
+    RUNCMD="su lava"
+fi
+
 "$DIR/capture-usb-mpp" \
     --device /dev/video18 \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
@@ -16,14 +21,20 @@ trap cleanup INT TERM EXIT
     --h264-sock /tmp/capture-usb-h264.sock &
 PIDS="$!"
 
-su lava -c "$DIR/stream-http.py \
+$RUNCMD -c "$DIR/stream-webrtc \
+    --h264-sock /tmp/capture-usb-h264.sock \
+    --webrtc-sock /tmp/capture-usb-webrtc.sock" &
+PIDS="$PIDS $!"
+
+$RUNCMD -c "$DIR/stream-http.py \
     --port 8081 \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
     --mjpeg-sock /tmp/capture-usb-mjpeg.sock \
-    --h264-sock /tmp/capture-usb-h264.sock" &
+    --h264-sock /tmp/capture-usb-h264.sock \
+    --webrtc-sock /tmp/capture-usb-webrtc.sock" &
 PIDS="$PIDS $!"
 
-su lava -c "$DIR/stream-snap-mqtt.py \
+$RUNCMD -c "$DIR/stream-snap-mqtt.py \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
     --publish-dir /home/lava/printer_data/camera" &
 PIDS="$PIDS $!"
