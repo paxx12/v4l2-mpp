@@ -44,5 +44,11 @@ $RUNCMD -c "$DIR/stream-rtsp \
     --rtsp-port 8554" &
 PIDS="$PIDS $!"
 
+bash -c "$DIR/detect-rknn.py \
+    --jpeg-sock /tmp/capture-mipi-jpeg.sock \
+    --model-path /home/lava/printer_data/model/printer_detector.0930.fp.rknn \
+    --labels-path /home/lava/printer_data/model/printer_detect_labels_list.txt \
+    --config-path /home/lava/printer_data/model/config.json" &
+
 wait -n
 echo "One of the processes has exited, cleaning up..."

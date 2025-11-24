@@ -1,0 +1,3 @@
+rknnlite2
+numpy
+opencv-python
