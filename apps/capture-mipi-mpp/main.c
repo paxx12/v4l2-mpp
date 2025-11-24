@@ -22,6 +22,8 @@
 #define V4L2_BUFFERS 4
 #define V4L2_MAX_PLANES 4
 
+const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
+
 static int debug = 0;
 
 typedef struct {
@@ -445,7 +447,7 @@ static int mpp_h264_encoder_init(mpp_ctx_t *ctx, unsigned int width, unsigned in
     return 0;
 }
 
-typedef void (*mpp_encode_cb)(void *data, size_t size, void *arg);
+typedef void (*mpp_encode_cb)(const void *data, size_t size, void *arg);
 
 static int mpp_encode_frame(mpp_ctx_t *ctx, void *data, size_t size, int force_idr, mpp_encode_cb cb, void *cb_arg)
 {
@@ -531,7 +533,7 @@ static void mpp_encoder_close(mpp_ctx_t *ctx)
     }
 }
 
-static void write_output_rename_cb(void *data, size_t size, void *arg)
+static void write_output_rename_cb(const void *data, size_t size, void *arg)
 {
     const char *output = arg;
     char tmp_path[512];
@@ -549,7 +551,7 @@ static void write_output_rename_cb(void *data, size_t size, void *arg)
 }
 
 typedef struct {
-    void (*cb)(void *data, size_t size, void *arg);
+    void (*cb)(const void *data, size_t size, void *arg);
     void *arg;
     bool run;
 } callback_chain_t;
@@ -565,7 +567,7 @@ static bool callback_chain_active(callback_chain_t *chain)
     return false;
 }
 
-static void write_callback_chain_cb(void *data, size_t size, void *arg)
+static void write_callback_chain_cb(const void *data, size_t size, void *arg)
 {
     callback_chain_t *chain = arg;
 
@@ -721,7 +723,7 @@ static void sock_wait_fds(sock_ctx_t *socks[], int timeout_ms)
     select(maxfd + 1, &rfds, NULL, NULL, &tv);
 }
 
-static ssize_t write_client_fd(int fd, void *data, size_t size)
+static ssize_t write_client_fd(int fd, const void *data, size_t size)
 {
     const char *ptr = data;
     size_t remaining = size;
@@ -742,7 +744,7 @@ static ssize_t write_client_fd(int fd, void *data, size_t size)
     return size;
 }
 
-static void write_sock_cb(void *data, size_t size, void *arg)
+static void write_sock_cb(const void *data, size_t size, void *arg)
 {
     sock_ctx_t *ctx = arg;
 
@@ -1024,7 +1026,9 @@ int main(int argc, char *argv[])
         }
 
         if (h264_sock.num_clients > 0) {
-            mpp_encode_frame(&mpp_h264, frame_data, bytesused, h264_sock.need_keyframe, write_sock_cb, &h264_sock);
+            if (mpp_encode_frame(&mpp_h264, frame_data, bytesused, h264_sock.need_keyframe, write_sock_cb, &h264_sock) == 0) {
+                write_sock_cb(NAL_AUD_FRAME, sizeof(NAL_AUD_FRAME), &h264_sock);
+            }
             h264_sock.need_keyframe = false;
             frames_this_h264_captured++;
             encoded_any = 1;

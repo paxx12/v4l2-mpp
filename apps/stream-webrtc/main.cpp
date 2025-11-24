@@ -61,9 +61,9 @@ static std::shared_ptr<Client> find_client(const std::string& id) {
     return nullptr;
 }
 
-static const uint8_t* find_start_code(const uint8_t* data, size_t size) {
+static const uint8_t* find_nal(const uint8_t* data, size_t size) {
     for (size_t i = 0; i + 3 < size; i++) {
-        if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1) {
+        if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1 && size - i > 4) {
             return data + i;
         }
     }
@@ -81,39 +81,10 @@ static bool is_new_frame_start(const uint8_t* nal, size_t nal_size) {
     return false;
 }
 
-static size_t find_frame_end(const uint8_t* data, size_t size) {
-    const uint8_t* ptr = data;
-    size_t remaining = size;
-    bool found_slice = false;
-
-    while (remaining >= 8) {
-        const uint8_t* start = find_start_code(ptr, remaining);
-        if (!start) break;
-
-        const uint8_t* next = find_start_code(start + 4, remaining - (start - ptr) - 4);
-        if (!next) break;
-
-        size_t nal_len = next - start;
-        if (nal_len < 5) {
-            ptr = next;
-            remaining = size - (ptr - data);
-            continue;
-        }
-
-        uint8_t nal_type = start[4] & 0x1f;
-
-        if (nal_type == 1 || nal_type == 5) {
-            if (found_slice && is_new_frame_start(next, size - (next - data))) {
-                return next - data;
-            }
-            found_slice = true;
-        }
-
-        ptr = next;
-        remaining = size - (ptr - data);
-    }
-
-    return 0;
+static bool is_nal_aud_frame(const uint8_t* nal, size_t nal_size) {
+    if (nal_size < 5) return false;
+    uint8_t nal_type = nal[4] & 0x1f;
+    return nal_type == 9 && nal_size == 6 && (nal[5] & 0x80) != 0;
 }
 
 static bool has_clients() {
@@ -153,26 +124,37 @@ static void send_frame(const uint8_t *data, size_t size) {
 
 static const uint8_t *process_frames(const uint8_t *data, const uint8_t *end) {
     while ((end - data) >= 8) {
-        const uint8_t* start = find_start_code(data, end - data);
+        const uint8_t* start = find_nal(data, end - data);
         if (!start) {
-            printf("No start code found, skipping %zu bytes\n", end - data);
             if (end - data > 4) {
+                // Leave only 4 bytes for next check
                 return end - 4;
             }
             return NULL;
         }
 
-        size_t au_size = find_frame_end(start, end - start);
-        if (au_size == 0) {
-            break;
+        const uint8_t* next = start;
+        bool found_slice = false;
+
+        while ((next = find_nal(next + 4, end - next - 4)) != NULL) {
+            if (is_nal_aud_frame(next, end - next)) {
+                break;
+            } else if (is_new_frame_start(next, end - next)) {
+                if (found_slice)
+                    break;
+                found_slice = true;
+            }
+        }
+        if (!next) {
+            return NULL;
         }
 
         if (g_debug) {
-            printf("Found access unit of size %zu bytes\n", au_size);
+            printf("Found AU of size %zu bytes\n", next - start);
         }
 
-        send_frame(start, au_size);
-        data = start + au_size;
+        send_frame(start, next - start);
+        data = next;
     }
 
     return data;
