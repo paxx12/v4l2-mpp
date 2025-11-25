@@ -19,29 +19,11 @@
 #include <rockchip/mpp_frame.h>
 #include <rockchip/mpp_packet.h>
 
-#define V4L2_BUFFERS 4
-#define V4L2_MAX_PLANES 4
+#include "v4l2_capture.h"
 
 const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
 
 static int debug = 0;
-
-typedef struct {
-    void *start[V4L2_MAX_PLANES];
-    size_t length[V4L2_MAX_PLANES];
-    unsigned int num_planes;
-} buffer_t;
-
-typedef struct {
-    int fd;
-    buffer_t *buffers;
-    unsigned int n_buffers;
-    unsigned int width;
-    unsigned int height;
-    unsigned int pixfmt;
-    enum v4l2_buf_type buf_type;
-    unsigned int num_planes;
-} v4l2_ctx_t;
 
 typedef struct {
     MppCtx ctx;
@@ -52,15 +34,6 @@ typedef struct {
     unsigned int height;
     MppFrameFormat fmt;
 } mpp_ctx_t;
-
-static int xioctl(int fd, int request, void *arg)
-{
-    int r;
-    do {
-        r = ioctl(fd, request, arg);
-    } while (r == -1 && errno == EINTR);
-    return r;
-}
 
 static MppFrameFormat v4l2_to_mpp_format(unsigned int pixfmt)
 {
@@ -95,238 +68,6 @@ static unsigned int parse_v4l2_format(const char *fmt)
     if (strcasecmp(fmt, "rgb24") == 0) return V4L2_PIX_FMT_RGB24;
     if (strcasecmp(fmt, "bgr24") == 0) return V4L2_PIX_FMT_BGR24;
     return V4L2_PIX_FMT_YUYV;
-}
-
-static int v4l2_open(v4l2_ctx_t *ctx, const char *device, unsigned int width, unsigned int height, unsigned int pixfmt, unsigned int fps)
-{
-    struct v4l2_capability cap;
-    struct v4l2_format fmt;
-    struct v4l2_requestbuffers req;
-    int use_mplane = 0;
-
-    ctx->fd = open(device, O_RDWR | O_NONBLOCK);
-    if (ctx->fd < 0) {
-        perror("open video device");
-        return -1;
-    }
-
-    if (xioctl(ctx->fd, VIDIOC_QUERYCAP, &cap) < 0) {
-        perror("VIDIOC_QUERYCAP");
-        return -1;
-    }
-
-    if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE) {
-        use_mplane = 1;
-        ctx->buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-        printf("Using multi-planar capture\n");
-    } else if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) {
-        ctx->buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        printf("Using single-planar capture\n");
-    } else {
-        fprintf(stderr, "Device does not support video capture\n");
-        return -1;
-    }
-
-    if (!(cap.capabilities & V4L2_CAP_STREAMING)) {
-        fprintf(stderr, "Device does not support streaming\n");
-        return -1;
-    }
-
-    memset(&fmt, 0, sizeof(fmt));
-    fmt.type = ctx->buf_type;
-
-    if (use_mplane) {
-        fmt.fmt.pix_mp.width = width;
-        fmt.fmt.pix_mp.height = height;
-        fmt.fmt.pix_mp.pixelformat = pixfmt;
-        fmt.fmt.pix_mp.field = V4L2_FIELD_ANY;
-    } else {
-        fmt.fmt.pix.width = width;
-        fmt.fmt.pix.height = height;
-        fmt.fmt.pix.pixelformat = pixfmt;
-        fmt.fmt.pix.field = V4L2_FIELD_ANY;
-    }
-
-    if (xioctl(ctx->fd, VIDIOC_S_FMT, &fmt) < 0) {
-        perror("VIDIOC_S_FMT");
-        return -1;
-    }
-
-    if (use_mplane) {
-        ctx->width = fmt.fmt.pix_mp.width;
-        ctx->height = fmt.fmt.pix_mp.height;
-        ctx->pixfmt = fmt.fmt.pix_mp.pixelformat;
-        ctx->num_planes = fmt.fmt.pix_mp.num_planes;
-    } else {
-        ctx->width = fmt.fmt.pix.width;
-        ctx->height = fmt.fmt.pix.height;
-        ctx->pixfmt = fmt.fmt.pix.pixelformat;
-        ctx->num_planes = 1;
-    }
-
-    printf("V4L2: %ux%u format=0x%08x planes=%u\n", ctx->width, ctx->height, ctx->pixfmt, ctx->num_planes);
-
-    if (fps > 0) {
-        struct v4l2_streamparm parm;
-        memset(&parm, 0, sizeof(parm));
-        parm.type = ctx->buf_type;
-        parm.parm.capture.timeperframe.numerator = 1;
-        parm.parm.capture.timeperframe.denominator = fps;
-        if (xioctl(ctx->fd, VIDIOC_S_PARM, &parm) < 0) {
-            perror("VIDIOC_S_PARM (fps)");
-        } else {
-            printf("V4L2: fps=%u/%u\n",
-                   parm.parm.capture.timeperframe.denominator,
-                   parm.parm.capture.timeperframe.numerator);
-        }
-    }
-
-    memset(&req, 0, sizeof(req));
-    req.count = V4L2_BUFFERS;
-    req.type = ctx->buf_type;
-    req.memory = V4L2_MEMORY_MMAP;
-
-    if (xioctl(ctx->fd, VIDIOC_REQBUFS, &req) < 0) {
-        perror("VIDIOC_REQBUFS");
-        return -1;
-    }
-
-    ctx->buffers = calloc(req.count, sizeof(buffer_t));
-    ctx->n_buffers = req.count;
-
-    for (unsigned int i = 0; i < req.count; i++) {
-        struct v4l2_buffer buf;
-        struct v4l2_plane planes[V4L2_MAX_PLANES];
-
-        memset(&buf, 0, sizeof(buf));
-        memset(planes, 0, sizeof(planes));
-
-        buf.type = ctx->buf_type;
-        buf.memory = V4L2_MEMORY_MMAP;
-        buf.index = i;
-
-        if (use_mplane) {
-            buf.m.planes = planes;
-            buf.length = ctx->num_planes;
-        }
-
-        if (xioctl(ctx->fd, VIDIOC_QUERYBUF, &buf) < 0) {
-            perror("VIDIOC_QUERYBUF");
-            return -1;
-        }
-
-        if (use_mplane) {
-            ctx->buffers[i].num_planes = ctx->num_planes;
-            for (unsigned int p = 0; p < ctx->num_planes; p++) {
-                ctx->buffers[i].length[p] = planes[p].length;
-                ctx->buffers[i].start[p] = mmap(NULL, planes[p].length,
-                                                PROT_READ | PROT_WRITE,
-                                                MAP_SHARED, ctx->fd,
-                                                planes[p].m.mem_offset);
-                if (ctx->buffers[i].start[p] == MAP_FAILED) {
-                    perror("mmap");
-                    return -1;
-                }
-            }
-        } else {
-            ctx->buffers[i].num_planes = 1;
-            ctx->buffers[i].length[0] = buf.length;
-            ctx->buffers[i].start[0] = mmap(NULL, buf.length,
-                                            PROT_READ | PROT_WRITE,
-                                            MAP_SHARED, ctx->fd,
-                                            buf.m.offset);
-            if (ctx->buffers[i].start[0] == MAP_FAILED) {
-                perror("mmap");
-                return -1;
-            }
-        }
-    }
-
-    return 0;
-}
-
-static int v4l2_start(v4l2_ctx_t *ctx)
-{
-    int use_mplane = (ctx->buf_type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
-
-    for (unsigned int i = 0; i < ctx->n_buffers; i++) {
-        struct v4l2_buffer buf;
-        struct v4l2_plane planes[V4L2_MAX_PLANES];
-
-        memset(&buf, 0, sizeof(buf));
-        memset(planes, 0, sizeof(planes));
-
-        buf.type = ctx->buf_type;
-        buf.memory = V4L2_MEMORY_MMAP;
-        buf.index = i;
-
-        if (use_mplane) {
-            buf.m.planes = planes;
-            buf.length = ctx->num_planes;
-        }
-
-        if (xioctl(ctx->fd, VIDIOC_QBUF, &buf) < 0) {
-            perror("VIDIOC_QBUF");
-            return -1;
-        }
-    }
-
-    if (xioctl(ctx->fd, VIDIOC_STREAMON, &ctx->buf_type) < 0) {
-        perror("VIDIOC_STREAMON");
-        return -1;
-    }
-
-    return 0;
-}
-
-static int v4l2_stop(v4l2_ctx_t *ctx)
-{
-    xioctl(ctx->fd, VIDIOC_STREAMOFF, &ctx->buf_type);
-    return 0;
-}
-
-static int v4l2_read_frame(v4l2_ctx_t *ctx, struct v4l2_buffer *buf, struct v4l2_plane *planes)
-{
-    int use_mplane = (ctx->buf_type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
-
-    memset(buf, 0, sizeof(*buf));
-    buf->type = ctx->buf_type;
-    buf->memory = V4L2_MEMORY_MMAP;
-
-    if (use_mplane) {
-        memset(planes, 0, sizeof(struct v4l2_plane) * V4L2_MAX_PLANES);
-        buf->m.planes = planes;
-        buf->length = ctx->num_planes;
-    }
-
-    if (xioctl(ctx->fd, VIDIOC_DQBUF, buf) < 0) {
-        if (errno == EAGAIN)
-            return 0;
-        perror("VIDIOC_DQBUF");
-        return -1;
-    }
-
-    return 1;
-}
-
-static int v4l2_release_frame(v4l2_ctx_t *ctx, struct v4l2_buffer *buf)
-{
-    if (xioctl(ctx->fd, VIDIOC_QBUF, buf) < 0) {
-        perror("VIDIOC_QBUF");
-        return -1;
-    }
-    return 0;
-}
-
-static void v4l2_close(v4l2_ctx_t *ctx)
-{
-    for (unsigned int i = 0; i < ctx->n_buffers; i++) {
-        for (unsigned int p = 0; p < ctx->buffers[i].num_planes; p++) {
-            munmap(ctx->buffers[i].start[p], ctx->buffers[i].length[p]);
-        }
-    }
-    free(ctx->buffers);
-    close(ctx->fd);
 }
 
 static int mpp_encoder_init(mpp_ctx_t *ctx, unsigned int width, unsigned int height, MppFrameFormat fmt, unsigned int quality)
@@ -902,7 +643,7 @@ int main(int argc, char *argv[])
     }
 
     unsigned int pixfmt = parse_v4l2_format(format);
-    v4l2_ctx_t v4l2 = {0};
+    v4l2_capture_t v4l2 = {0};
     mpp_ctx_t mpp_jpeg = {0};
     mpp_ctx_t mpp_h264 = {0};
     sock_ctx_t jpeg_sock = {0};
@@ -919,7 +660,7 @@ int main(int argc, char *argv[])
     printf("FPS: %d\n", fps);
     printf("Frames: %d\n", count);
 
-    if (v4l2_open(&v4l2, device, width, height, pixfmt, fps) < 0) {
+    if (v4l2_capture_open(&v4l2, device, width, height, pixfmt, fps) < 0) {
         fprintf(stderr, "Failed to open V4L2 device\n");
         return 1;
     }
@@ -953,7 +694,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (v4l2_start(&v4l2) < 0) {
+    if (v4l2_capture_start(&v4l2) < 0) {
         fprintf(stderr, "Failed to start V4L2 streaming\n");
         goto error;
     }
@@ -993,7 +734,7 @@ int main(int argc, char *argv[])
 
         struct v4l2_buffer buf;
         struct v4l2_plane planes[V4L2_MAX_PLANES];
-        int ret = v4l2_read_frame(&v4l2, &buf, planes);
+        int ret = v4l2_capture_read_frame(&v4l2, &buf, planes);
         if (ret < 0)
             break;
         if (ret == 0)
@@ -1034,7 +775,7 @@ int main(int argc, char *argv[])
             encoded_any = 1;
         }
 
-        v4l2_release_frame(&v4l2, &buf);
+        v4l2_capture_release_frame(&v4l2, &buf);
 
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1067,13 +808,13 @@ int main(int argc, char *argv[])
         }
     }
 
-    v4l2_stop(&v4l2);
+    v4l2_capture_stop(&v4l2);
     sock_close(&h264_sock);
     sock_close(&mjpeg_sock);
     sock_close(&jpeg_sock);
     mpp_encoder_close(&mpp_h264);
     mpp_encoder_close(&mpp_jpeg);
-    v4l2_close(&v4l2);
+    v4l2_capture_close(&v4l2);
 
     printf("Captured %d frames\n", frames_captured);
     return 0;
@@ -1084,6 +825,6 @@ error:
     sock_close(&jpeg_sock);
     mpp_encoder_close(&mpp_h264);
     mpp_encoder_close(&mpp_jpeg);
-    v4l2_close(&v4l2);
+    v4l2_capture_close(&v4l2);
     return 1;
 }

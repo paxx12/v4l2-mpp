@@ -19,25 +19,11 @@
 #include <rockchip/mpp_frame.h>
 #include <rockchip/mpp_packet.h>
 
-#define V4L2_BUFFERS 4
+#include "v4l2_capture.h"
 
 const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
 
 static int debug = 0;
-
-typedef struct {
-    void *start;
-    size_t length;
-} buffer_t;
-
-typedef struct {
-    int fd;
-    buffer_t *buffers;
-    unsigned int n_buffers;
-    unsigned int width;
-    unsigned int height;
-    unsigned int pixfmt;
-} v4l2_ctx_t;
 
 typedef struct {
     MppCtx ctx;
@@ -56,182 +42,6 @@ typedef struct {
     unsigned int width;
     unsigned int height;
 } mpp_enc_ctx_t;
-
-static int xioctl(int fd, int request, void *arg)
-{
-    int r;
-    do {
-        r = ioctl(fd, request, arg);
-    } while (r == -1 && errno == EINTR);
-    return r;
-}
-
-static int v4l2_open(v4l2_ctx_t *ctx, const char *device, unsigned int width, unsigned int height, unsigned int fps)
-{
-    struct v4l2_capability cap;
-    struct v4l2_format fmt;
-    struct v4l2_requestbuffers req;
-
-    ctx->fd = open(device, O_RDWR | O_NONBLOCK);
-    if (ctx->fd < 0) {
-        perror("open video device");
-        return -1;
-    }
-
-    if (xioctl(ctx->fd, VIDIOC_QUERYCAP, &cap) < 0) {
-        perror("VIDIOC_QUERYCAP");
-        return -1;
-    }
-
-    if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
-        fprintf(stderr, "Device does not support video capture\n");
-        return -1;
-    }
-
-    if (!(cap.capabilities & V4L2_CAP_STREAMING)) {
-        fprintf(stderr, "Device does not support streaming\n");
-        return -1;
-    }
-
-    memset(&fmt, 0, sizeof(fmt));
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = width;
-    fmt.fmt.pix.height = height;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-    fmt.fmt.pix.field = V4L2_FIELD_ANY;
-
-    if (xioctl(ctx->fd, VIDIOC_S_FMT, &fmt) < 0) {
-        fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_JPEG;
-        if (xioctl(ctx->fd, VIDIOC_S_FMT, &fmt) < 0) {
-            perror("VIDIOC_S_FMT");
-            return -1;
-        }
-    }
-
-    ctx->width = fmt.fmt.pix.width;
-    ctx->height = fmt.fmt.pix.height;
-    ctx->pixfmt = fmt.fmt.pix.pixelformat;
-
-    printf("V4L2: %ux%u format=0x%08x\n", ctx->width, ctx->height, ctx->pixfmt);
-
-    if (fps > 0) {
-        struct v4l2_streamparm parm;
-        memset(&parm, 0, sizeof(parm));
-        parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        parm.parm.capture.timeperframe.numerator = 1;
-        parm.parm.capture.timeperframe.denominator = fps;
-        if (xioctl(ctx->fd, VIDIOC_S_PARM, &parm) < 0) {
-            perror("VIDIOC_S_PARM (fps)");
-        } else {
-            printf("V4L2: fps=%u/%u\n",
-                   parm.parm.capture.timeperframe.denominator,
-                   parm.parm.capture.timeperframe.numerator);
-        }
-    }
-
-    memset(&req, 0, sizeof(req));
-    req.count = V4L2_BUFFERS;
-    req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    req.memory = V4L2_MEMORY_MMAP;
-
-    if (xioctl(ctx->fd, VIDIOC_REQBUFS, &req) < 0) {
-        perror("VIDIOC_REQBUFS");
-        return -1;
-    }
-
-    ctx->buffers = calloc(req.count, sizeof(buffer_t));
-    ctx->n_buffers = req.count;
-
-    for (unsigned int i = 0; i < req.count; i++) {
-        struct v4l2_buffer buf;
-        memset(&buf, 0, sizeof(buf));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
-        buf.index = i;
-
-        if (xioctl(ctx->fd, VIDIOC_QUERYBUF, &buf) < 0) {
-            perror("VIDIOC_QUERYBUF");
-            return -1;
-        }
-
-        ctx->buffers[i].length = buf.length;
-        ctx->buffers[i].start = mmap(NULL, buf.length,
-                                     PROT_READ | PROT_WRITE,
-                                     MAP_SHARED, ctx->fd,
-                                     buf.m.offset);
-        if (ctx->buffers[i].start == MAP_FAILED) {
-            perror("mmap");
-            return -1;
-        }
-    }
-
-    return 0;
-}
-
-static int v4l2_start(v4l2_ctx_t *ctx)
-{
-    for (unsigned int i = 0; i < ctx->n_buffers; i++) {
-        struct v4l2_buffer buf;
-        memset(&buf, 0, sizeof(buf));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
-        buf.index = i;
-
-        if (xioctl(ctx->fd, VIDIOC_QBUF, &buf) < 0) {
-            perror("VIDIOC_QBUF");
-            return -1;
-        }
-    }
-
-    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if (xioctl(ctx->fd, VIDIOC_STREAMON, &type) < 0) {
-        perror("VIDIOC_STREAMON");
-        return -1;
-    }
-
-    return 0;
-}
-
-static int v4l2_stop(v4l2_ctx_t *ctx)
-{
-    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    xioctl(ctx->fd, VIDIOC_STREAMOFF, &type);
-    return 0;
-}
-
-static int v4l2_read_frame(v4l2_ctx_t *ctx, struct v4l2_buffer *buf)
-{
-    memset(buf, 0, sizeof(*buf));
-    buf->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf->memory = V4L2_MEMORY_MMAP;
-
-    if (xioctl(ctx->fd, VIDIOC_DQBUF, buf) < 0) {
-        if (errno == EAGAIN)
-            return 0;
-        perror("VIDIOC_DQBUF");
-        return -1;
-    }
-
-    return 1;
-}
-
-static int v4l2_release_frame(v4l2_ctx_t *ctx, struct v4l2_buffer *buf)
-{
-    if (xioctl(ctx->fd, VIDIOC_QBUF, buf) < 0) {
-        perror("VIDIOC_QBUF");
-        return -1;
-    }
-    return 0;
-}
-
-static void v4l2_close(v4l2_ctx_t *ctx)
-{
-    for (unsigned int i = 0; i < ctx->n_buffers; i++) {
-        munmap(ctx->buffers[i].start, ctx->buffers[i].length);
-    }
-    free(ctx->buffers);
-    close(ctx->fd);
-}
 
 static int mpp_decoder_init(mpp_dec_ctx_t *ctx, unsigned int width, unsigned int height)
 {
@@ -856,7 +666,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    v4l2_ctx_t v4l2 = {0};
+    v4l2_capture_t v4l2 = {0};
     mpp_dec_ctx_t mpp_dec = {0};
     mpp_enc_ctx_t mpp_enc = {0};
     sock_ctx_t jpeg_sock = {0};
@@ -871,7 +681,7 @@ int main(int argc, char *argv[])
     if (h264_stream) printf("H264 stream socket: %s\n", h264_stream);
     printf("FPS: %d\n", fps);
 
-    if (v4l2_open(&v4l2, device, width, height, fps) < 0) {
+    if (v4l2_capture_open(&v4l2, device, width, height, V4L2_PIX_FMT_MJPEG, fps) < 0) {
         fprintf(stderr, "Failed to open V4L2 device\n");
         return 1;
     }
@@ -904,7 +714,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (v4l2_start(&v4l2) < 0) {
+    if (v4l2_capture_start(&v4l2) < 0) {
         fprintf(stderr, "Failed to start V4L2 streaming\n");
         goto error;
     }
@@ -942,13 +752,14 @@ int main(int argc, char *argv[])
         }
 
         struct v4l2_buffer buf;
-        int ret = v4l2_read_frame(&v4l2, &buf);
+        struct v4l2_plane planes[V4L2_MAX_PLANES];
+        int ret = v4l2_capture_read_frame(&v4l2, &buf, planes);
         if (ret < 0)
             break;
         if (ret == 0)
             continue;
 
-        void *frame_data = v4l2.buffers[buf.index].start;
+        void *frame_data = v4l2.buffers[buf.index].start[0];
         size_t bytesused = buf.bytesused;
 
         sock_accept_clients(&jpeg_sock);
@@ -986,7 +797,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        v4l2_release_frame(&v4l2, &buf);
+        v4l2_capture_release_frame(&v4l2, &buf);
 
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1019,13 +830,13 @@ int main(int argc, char *argv[])
         }
     }
 
-    v4l2_stop(&v4l2);
+    v4l2_capture_stop(&v4l2);
     sock_close(&h264_sock);
     sock_close(&mjpeg_sock);
     sock_close(&jpeg_sock);
     mpp_encoder_close(&mpp_enc);
     mpp_decoder_close(&mpp_dec);
-    v4l2_close(&v4l2);
+    v4l2_capture_close(&v4l2);
 
     printf("Captured %d frames\n", frames_captured);
     return 0;
@@ -1036,6 +847,6 @@ error:
     sock_close(&jpeg_sock);
     mpp_encoder_close(&mpp_enc);
     mpp_decoder_close(&mpp_dec);
-    v4l2_close(&v4l2);
+    v4l2_capture_close(&v4l2);
     return 1;
 }
