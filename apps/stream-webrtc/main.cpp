@@ -20,18 +20,20 @@
 #include <rtc/rtc.hpp>
 #include <nlohmann/json.hpp>
 
+#include "h264_frames.h"
+#include "h264_stream.h"
+
 using json = nlohmann::json;
 
 static std::atomic<bool> g_running{true};
 static int g_debug = 0;
+static h264_stream_t g_h264_stream = H264_STREAM_INIT;
 
 static constexpr int PING_INTERVAL_MS = 1000;
 static constexpr int CONNECT_TIMEOUT_MS = 30000;
 static constexpr int PONG_TIMEOUT_MS = 30000;
 static constexpr int DEFAULT_SESSION_S = 60 * 60;
 static constexpr int MAX_SESSION_WITHOUT_TIMEOUT_S = 15 * 60;
-static constexpr int MIN_FRAME_SIZE = 64 * 1024;
-static constexpr int MAX_FRAME_SIZE = 2 * 1024 * 1024;
 
 struct Client {
     std::string id;
@@ -62,32 +64,6 @@ static std::shared_ptr<Client> find_client(const std::string& id) {
         if (c->id == id) return c;
     }
     return nullptr;
-}
-
-static const uint8_t* find_nal(const uint8_t* data, size_t size) {
-    for (size_t i = 0; i + 3 < size; i++) {
-        if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1 && size - i > 4) {
-            return data + i;
-        }
-    }
-    return nullptr;
-}
-
-static bool is_new_frame_start(const uint8_t* nal, size_t nal_size) {
-    if (nal_size < 5) return false;
-    uint8_t nal_type = nal[4] & 0x1f;
-    if (nal_type == 1 || nal_type == 5) {
-        if (nal_size < 6) return true;
-        uint8_t first_byte = nal[5];
-        return (first_byte & 0x80) != 0;
-    }
-    return false;
-}
-
-static bool is_nal_aud_frame(const uint8_t* nal, size_t nal_size) {
-    if (nal_size < 5) return false;
-    uint8_t nal_type = nal[4] & 0x1f;
-    return nal_type == 9 && nal_size == 6 && (nal[5] & 0x80) != 0;
 }
 
 static bool has_clients() {
@@ -123,44 +99,6 @@ static void send_frame(const uint8_t *data, size_t size) {
             client->video_track->send(frame);
         } catch (...) {}
     }
-}
-
-static const uint8_t *process_frames(const uint8_t *data, const uint8_t *end) {
-    while ((end - data) >= 8) {
-        const uint8_t* start = find_nal(data, end - data);
-        if (!start) {
-            if (end - data > 4) {
-                // Leave only 4 bytes for next check
-                return end - 4;
-            }
-            return NULL;
-        }
-
-        const uint8_t* next = start;
-        bool found_slice = false;
-
-        while ((next = find_nal(next + 4, end - next - 4)) != NULL) {
-            if (is_nal_aud_frame(next, end - next)) {
-                break;
-            } else if (is_new_frame_start(next, end - next)) {
-                if (found_slice)
-                    break;
-                found_slice = true;
-            }
-        }
-        if (!next) {
-            return NULL;
-        }
-
-        if (g_debug) {
-            printf("Found AU of size %zu bytes\n", next - start);
-        }
-
-        send_frame(start, next - start);
-        data = next;
-    }
-
-    return data;
 }
 
 static void cleanup_clients() {
@@ -438,85 +376,6 @@ static void handle_connection(int fd) {
     close(fd);
 }
 
-static void open_h264(int &fd, std::vector<uint8_t>& buf, size_t &buf_size) {
-    if (fd >= 0) {
-        return;
-    }
-
-    buf_size = 0;
-    buf.resize(0);
-
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        std::perror("socket");
-        return;
-    }
-
-    struct sockaddr_un addr;
-    std::memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, g_h264_sock.c_str(), sizeof(addr.sun_path) - 1);
-
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        std::perror("connect");
-        close(fd);
-        fd = -1;
-    } else {
-        std::cerr << "Connected to H264 socket" << std::endl;
-    }
-}
-
-static void close_h264(int &fd, std::vector<uint8_t>& buf, size_t &buf_size) {
-    if (fd < 0) {
-        return;
-    }
-
-    close(fd);
-    fd = -1;
-    buf.clear();
-    buf_size = 0;
-    std::cerr << "Disconnected from H264 socket" << std::endl;
-}
-
-static void process_h264(int &fd, std::vector<uint8_t>& buf, size_t &buf_size) {
-    if (fd < 0) {
-        return;
-    }
-
-    if (buf_size >= MAX_FRAME_SIZE) {
-        std::cerr << "Buffer overflow, resetting buffer" << std::endl;
-        buf_size = 0;
-    } else if (buf_size + MIN_FRAME_SIZE / 2 > buf.size()) {
-        buf.resize(buf_size + MIN_FRAME_SIZE);
-    }
-
-    ssize_t n = read(fd, buf.data() + buf_size, buf.size() - buf_size);
-    if (n < 0) {
-        if (n == EAGAIN || n == EWOULDBLOCK) {
-            return;
-        }
-        std::perror("read");
-        close(fd);
-        fd = -1;
-        return;
-    }
-
-    buf_size += n;
-
-    const uint8_t* processed = process_frames(buf.data(), buf.data() + buf_size);
-    if (processed) {
-        size_t remaining = buf_size - (processed - buf.data());
-        if (remaining > 0) {
-            std::memmove(buf.data(), processed, remaining);
-        }
-        buf_size = remaining;
-
-        if (buf.size() > MIN_FRAME_SIZE) {
-            buf.resize(remaining + MIN_FRAME_SIZE);
-        }
-    }
-}
-
 static void signal_handler(int) {
     g_running = false;
 }
@@ -626,14 +485,10 @@ int main(int argc, char* argv[]) {
 
     std::cout << "WebRTC server running..." << std::endl;
 
-    int h264_fd = -1;
-    std::vector<uint8_t> h264_buf;
-    size_t h264_buf_size = 0;
-
     while (g_running) {
         struct pollfd pfd[] = {
             {listen_fd, POLLIN, 0},
-            {h264_fd, POLLIN, 0}
+            {g_h264_stream.fd, POLLIN, 0}
         };
         int ret = poll(pfd, 2, 100);
 
@@ -644,21 +499,22 @@ int main(int argc, char* argv[]) {
             }
         }
         if (ret > 0 && (pfd[1].revents & POLLIN)) {
-            process_h264(h264_fd, h264_buf, h264_buf_size);
+            h264_stream_process(&g_h264_stream, send_frame);
         }
 
         ping_clients();
         cleanup_clients();
 
         if (has_clients()) {
-            open_h264(h264_fd, h264_buf, h264_buf_size);
+            h264_stream_open(&g_h264_stream, g_h264_sock.c_str());
         } else {
-            close_h264(h264_fd, h264_buf, h264_buf_size);
+            h264_stream_close(&g_h264_stream);
         }
     }
 
     std::cout << "Shutting down..." << std::endl;
 
+    h264_stream_close(&g_h264_stream);
     close(listen_fd);
     unlink(webrtc_sock.c_str());
     return 0;

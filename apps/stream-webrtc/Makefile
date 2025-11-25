@@ -3,8 +3,8 @@ SRCS = main.cpp
 OBJS = $(SRCS:.cpp=.o)
 
 CXX ?= g++
-CXXFLAGS ?= -Wall -Wextra -O2 -std=c++17
-LDFLAGS ?= -static-libstdc++ 
+CXXFLAGS ?= -Wall -Wextra -O2 -std=c++17 -I../../common/stream-common
+LDFLAGS ?= -static-libstdc++
 
 LIBDATACHANNEL_PATH := $(CURDIR)/../../deps/libdatachannel
 
