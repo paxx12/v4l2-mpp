@@ -3,7 +3,7 @@ SRCS = main.c
 OBJS = $(SRCS:.c=.o)
 
 CC ?= gcc
-CFLAGS ?= -Wall -Wextra -O2
+CFLAGS ?= -Wall -Wextra -O2 -I../../common/capture-common
 LDFLAGS ?=
 
 ifneq (x,x$(wildcard $(CURDIR)/../../deps/mpp/usr-local/lib/pkgconfig))
