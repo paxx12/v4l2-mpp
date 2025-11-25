@@ -22,304 +22,12 @@
 #include "v4l2_capture.h"
 #include "sock_ctx.h"
 #include "callback_chain.h"
+#include "mpp_dec_ctx.h"
+#include "mpp_enc_ctx.h"
 
 const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
 
-static int debug = 0;
-
-typedef struct {
-    MppCtx ctx;
-    MppApi *mpi;
-    MppBufferGroup frm_grp;
-    MppBufferGroup pkt_grp;
-    unsigned int width;
-    unsigned int height;
-} mpp_dec_ctx_t;
-
-typedef struct {
-    MppCtx ctx;
-    MppApi *mpi;
-    MppBufferGroup buf_grp;
-    MppEncCfg cfg;
-    unsigned int width;
-    unsigned int height;
-} mpp_enc_ctx_t;
-
-static int mpp_decoder_init(mpp_dec_ctx_t *ctx, unsigned int width, unsigned int height)
-{
-    MPP_RET ret;
-
-    ctx->width = width;
-    ctx->height = height;
-
-    ret = mpp_create(&ctx->ctx, &ctx->mpi);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_create failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_init(ctx->ctx, MPP_CTX_DEC, MPP_VIDEO_CodingMJPEG);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_init decoder failed: %d\n", ret);
-        return -1;
-    }
-
-    MppDecCfg cfg = NULL;
-    mpp_dec_cfg_init(&cfg);
-    mpp_dec_cfg_set_u32(cfg, "base:out_fmt", MPP_FMT_YUV420SP);
-    ret = ctx->mpi->control(ctx->ctx, MPP_DEC_SET_CFG, cfg);
-    mpp_dec_cfg_deinit(cfg);
-
-    if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_DEC_SET_CFG failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_buffer_group_get_internal(&ctx->pkt_grp, MPP_BUFFER_TYPE_ION);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal pkt failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_buffer_group_get_internal(&ctx->frm_grp, MPP_BUFFER_TYPE_ION);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal frm failed: %d\n", ret);
-        return -1;
-    }
-
-    return 0;
-}
-
-static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void *data, size_t size)
-{
-    MPP_RET ret;
-    MppTask task = NULL;
-    MppBuffer pkt_buf = NULL;
-    MppBuffer frm_buf = NULL;
-    MppPacket packet = NULL;
-    MppFrame frame = NULL;
-    size_t frame_size;
-
-    frame_size = ctx->width * ctx->height * 2;
-
-    ret = mpp_buffer_get(ctx->pkt_grp, &pkt_buf, size);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_get pkt failed: %d\n", ret);
-        return NULL;
-    }
-
-    memcpy(mpp_buffer_get_ptr(pkt_buf), data, size);
-
-    ret = mpp_packet_init_with_buffer(&packet, pkt_buf);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_packet_init_with_buffer failed: %d\n", ret);
-        mpp_buffer_put(pkt_buf);
-        return NULL;
-    }
-    mpp_packet_set_length(packet, size);
-
-    ret = mpp_buffer_get(ctx->frm_grp, &frm_buf, frame_size);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_get frm failed: %d\n", ret);
-        mpp_packet_deinit(&packet);
-        mpp_buffer_put(pkt_buf);
-        return NULL;
-    }
-
-    ret = mpp_frame_init(&frame);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_frame_init failed: %d\n", ret);
-        mpp_packet_deinit(&packet);
-        mpp_buffer_put(pkt_buf);
-        mpp_buffer_put(frm_buf);
-        return NULL;
-    }
-    mpp_frame_set_buffer(frame, frm_buf);
-
-    ret = ctx->mpi->poll(ctx->ctx, MPP_PORT_INPUT, MPP_POLL_BLOCK);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "poll input failed: %d\n", ret);
-        goto error;
-    }
-
-    ret = ctx->mpi->dequeue(ctx->ctx, MPP_PORT_INPUT, &task);
-    if (ret != MPP_OK || !task) {
-        fprintf(stderr, "dequeue input failed: %d\n", ret);
-        goto error;
-    }
-
-    mpp_task_meta_set_packet(task, KEY_INPUT_PACKET, packet);
-    mpp_task_meta_set_frame(task, KEY_OUTPUT_FRAME, frame);
-
-    ret = ctx->mpi->enqueue(ctx->ctx, MPP_PORT_INPUT, task);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "enqueue input failed: %d\n", ret);
-        goto error;
-    }
-
-    ret = ctx->mpi->poll(ctx->ctx, MPP_PORT_OUTPUT, MPP_POLL_BLOCK);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "poll output failed: %d\n", ret);
-        goto error;
-    }
-
-    ret = ctx->mpi->dequeue(ctx->ctx, MPP_PORT_OUTPUT, &task);
-    if (ret != MPP_OK || !task) {
-        fprintf(stderr, "dequeue output failed: %d\n", ret);
-        goto error;
-    }
-
-    MppFrame output_frame = NULL;
-    mpp_task_meta_get_frame(task, KEY_OUTPUT_FRAME, &output_frame);
-
-    ret = ctx->mpi->enqueue(ctx->ctx, MPP_PORT_OUTPUT, task);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "enqueue output failed: %d\n", ret);
-    }
-
-    mpp_packet_deinit(&packet);
-    mpp_buffer_put(pkt_buf);
-    mpp_buffer_put(frm_buf);
-
-    return output_frame;
-
-error:
-    if (frame) mpp_frame_deinit(&frame);
-    if (packet) mpp_packet_deinit(&packet);
-    if (pkt_buf) mpp_buffer_put(pkt_buf);
-    if (frm_buf) mpp_buffer_put(frm_buf);
-    return NULL;
-}
-
-static void mpp_decoder_close(mpp_dec_ctx_t *ctx)
-{
-    if (ctx->pkt_grp) {
-        mpp_buffer_group_put(ctx->pkt_grp);
-    }
-    if (ctx->frm_grp) {
-        mpp_buffer_group_put(ctx->frm_grp);
-    }
-    if (ctx->ctx) {
-        ctx->mpi->reset(ctx->ctx);
-        mpp_destroy(ctx->ctx);
-    }
-}
-
-static int mpp_h264_encoder_init(mpp_enc_ctx_t *ctx, unsigned int width, unsigned int height, unsigned int bitrate, unsigned int fps)
-{
-    MPP_RET ret;
-
-    ctx->width = width;
-    ctx->height = height;
-
-    ret = mpp_create(&ctx->ctx, &ctx->mpi);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_create failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_init(ctx->ctx, MPP_CTX_ENC, MPP_VIDEO_CodingAVC);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_init failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_enc_cfg_init(&ctx->cfg);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_enc_cfg_init failed: %d\n", ret);
-        return -1;
-    }
-
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:width", width);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:height", height);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:hor_stride", width);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:ver_stride", height);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:format", MPP_FMT_YUV420SP);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:mode", MPP_ENC_RC_MODE_CBR);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:bps_target", bitrate * 1000);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:bps_max", bitrate * 1500);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:bps_min", bitrate * 500);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_in_flex", 0);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_in_num", fps);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_in_denorm", 1);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_out_flex", 0);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_out_num", fps);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_out_denorm", 1);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:gop", fps * 2);
-    mpp_enc_cfg_set_s32(ctx->cfg, "codec:type", MPP_VIDEO_CodingAVC);
-    mpp_enc_cfg_set_s32(ctx->cfg, "h264:profile", 100);
-    mpp_enc_cfg_set_s32(ctx->cfg, "h264:level", 41);
-    mpp_enc_cfg_set_s32(ctx->cfg, "h264:cabac_en", 1);
-    mpp_enc_cfg_set_s32(ctx->cfg, "h264:cabac_idc", 0);
-
-    ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_CFG, ctx->cfg);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_ENC_SET_CFG failed: %d\n", ret);
-        return -1;
-    }
-
-    MppEncHeaderMode header_mode = MPP_ENC_HEADER_MODE_EACH_IDR;
-    ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_HEADER_MODE, &header_mode);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_ENC_SET_HEADER_MODE failed: %d\n", ret);
-    }
-
-    ret = mpp_buffer_group_get_internal(&ctx->buf_grp, MPP_BUFFER_TYPE_DRM);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal failed: %d\n", ret);
-        return -1;
-    }
-
-    return 0;
-}
-
-typedef void (*mpp_encode_cb)(const void *data, size_t size, void *arg);
-
-static int mpp_encode_h264(mpp_enc_ctx_t *ctx, MppFrame frame, int force_idr, mpp_encode_cb cb, void *cb_arg)
-{
-    MPP_RET ret;
-    MppPacket packet = NULL;
-    MppMeta meta = NULL;
-
-    if (force_idr) {
-        meta = mpp_frame_get_meta(frame);
-        if (meta) {
-            mpp_meta_set_s32(meta, KEY_INPUT_IDR_REQ, 1);
-            if (debug) printf("Requesting IDR frame via meta\n");
-        }
-    }
-
-    ret = ctx->mpi->encode_put_frame(ctx->ctx, frame);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "encode_put_frame failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = ctx->mpi->encode_get_packet(ctx->ctx, &packet);
-    if (ret != MPP_OK || !packet) {
-        fprintf(stderr, "encode_get_packet failed: %d\n", ret);
-        return -1;
-    }
-
-    cb(mpp_packet_get_pos(packet), mpp_packet_get_length(packet), cb_arg);
-
-    mpp_packet_deinit(&packet);
-    return 0;
-}
-
-static void mpp_encoder_close(mpp_enc_ctx_t *ctx)
-{
-    if (ctx->cfg) {
-        mpp_enc_cfg_deinit(ctx->cfg);
-    }
-    if (ctx->buf_grp) {
-        mpp_buffer_group_put(ctx->buf_grp);
-    }
-    if (ctx->ctx) {
-        ctx->mpi->reset(ctx->ctx);
-        mpp_destroy(ctx->ctx);
-    }
-}
+int debug = 0;
 
 static void write_output_rename_cb(const void *data, size_t size, void *arg)
 {
@@ -477,12 +185,12 @@ int main(int argc, char *argv[])
     }
 
     if (h264_stream) {
-        if (mpp_decoder_init(&mpp_dec, v4l2.width, v4l2.height) < 0) {
+        if (mpp_jpeg_decoder_init(&mpp_dec, v4l2.width, v4l2.height) < 0) {
             fprintf(stderr, "Failed to initialize JPEG decoder\n");
             goto error;
         }
 
-        if (mpp_h264_encoder_init(&mpp_enc, v4l2.width, v4l2.height, bitrate, fps) < 0) {
+        if (mpp_h264_encoder_init(&mpp_enc, v4l2.width, v4l2.height, MPP_FMT_YUV420SP, bitrate, fps) < 0) {
             fprintf(stderr, "Failed to initialize H264 encoder\n");
             goto error;
         }
@@ -566,8 +274,11 @@ int main(int argc, char *argv[])
         if (h264_sock.num_clients > 0) {
             MppFrame decoded = mpp_decode_jpeg(&mpp_dec, frame_data, bytesused);
             if (decoded) {
-                if (mpp_encode_h264(&mpp_enc, decoded, h264_sock.need_keyframe, sock_write_cb, &h264_sock) == 0) {
+                MppPacket packet = mpp_encode_mppframe(&mpp_enc, decoded, h264_sock.need_keyframe);
+                if (packet) {
+                    sock_write_cb(mpp_packet_get_pos(packet), mpp_packet_get_length(packet), &h264_sock);
                     sock_write_cb(NAL_AUD_FRAME, sizeof(NAL_AUD_FRAME), &h264_sock);
+                    mpp_packet_deinit(&packet);
                 }
                 h264_sock.need_keyframe = false;
                 frames_this_h264_captured++;

@@ -22,20 +22,11 @@
 #include "v4l2_capture.h"
 #include "sock_ctx.h"
 #include "callback_chain.h"
+#include "mpp_enc_ctx.h"
 
 const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
 
-static int debug = 0;
-
-typedef struct {
-    MppCtx ctx;
-    MppApi *mpi;
-    MppBufferGroup buf_grp;
-    MppEncCfg cfg;
-    unsigned int width;
-    unsigned int height;
-    MppFrameFormat fmt;
-} mpp_ctx_t;
+int debug = 0;
 
 static MppFrameFormat v4l2_to_mpp_format(unsigned int pixfmt)
 {
@@ -70,210 +61,6 @@ static unsigned int parse_v4l2_format(const char *fmt)
     if (strcasecmp(fmt, "rgb24") == 0) return V4L2_PIX_FMT_RGB24;
     if (strcasecmp(fmt, "bgr24") == 0) return V4L2_PIX_FMT_BGR24;
     return V4L2_PIX_FMT_YUYV;
-}
-
-static int mpp_encoder_init(mpp_ctx_t *ctx, unsigned int width, unsigned int height, MppFrameFormat fmt, unsigned int quality)
-{
-    MPP_RET ret;
-
-    ctx->width = width;
-    ctx->height = height;
-    ctx->fmt = fmt;
-
-    ret = mpp_create(&ctx->ctx, &ctx->mpi);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_create failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_init(ctx->ctx, MPP_CTX_ENC, MPP_VIDEO_CodingMJPEG);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_init failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_enc_cfg_init(&ctx->cfg);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_enc_cfg_init failed: %d\n", ret);
-        return -1;
-    }
-
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:width", width);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:height", height);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:hor_stride", width);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:ver_stride", height);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:format", fmt);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:mode", MPP_ENC_RC_MODE_FIXQP);
-    mpp_enc_cfg_set_s32(ctx->cfg, "jpeg:quant", quality);
-
-    ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_CFG, ctx->cfg);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_ENC_SET_CFG failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_buffer_group_get_internal(&ctx->buf_grp, MPP_BUFFER_TYPE_DRM);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal failed: %d\n", ret);
-        return -1;
-    }
-
-    return 0;
-}
-
-static int mpp_h264_encoder_init(mpp_ctx_t *ctx, unsigned int width, unsigned int height, MppFrameFormat fmt, unsigned int bitrate, unsigned int fps)
-{
-    MPP_RET ret;
-
-    ctx->width = width;
-    ctx->height = height;
-    ctx->fmt = fmt;
-
-    ret = mpp_create(&ctx->ctx, &ctx->mpi);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_create failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_init(ctx->ctx, MPP_CTX_ENC, MPP_VIDEO_CodingAVC);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_init failed: %d\n", ret);
-        return -1;
-    }
-
-    ret = mpp_enc_cfg_init(&ctx->cfg);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_enc_cfg_init failed: %d\n", ret);
-        return -1;
-    }
-
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:width", width);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:height", height);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:hor_stride", width);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:ver_stride", height);
-    mpp_enc_cfg_set_s32(ctx->cfg, "prep:format", fmt);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:mode", MPP_ENC_RC_MODE_CBR);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:bps_target", bitrate * 1000);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:bps_max", bitrate * 1500);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:bps_min", bitrate * 500);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_in_flex", 0);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_in_num", fps);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_in_denorm", 1);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_out_flex", 0);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_out_num", fps);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:fps_out_denorm", 1);
-    mpp_enc_cfg_set_s32(ctx->cfg, "rc:gop", fps * 2);
-    mpp_enc_cfg_set_s32(ctx->cfg, "codec:type", MPP_VIDEO_CodingAVC);
-    mpp_enc_cfg_set_s32(ctx->cfg, "h264:profile", 100);
-    mpp_enc_cfg_set_s32(ctx->cfg, "h264:level", 41);
-    mpp_enc_cfg_set_s32(ctx->cfg, "h264:cabac_en", 1);
-    mpp_enc_cfg_set_s32(ctx->cfg, "h264:cabac_idc", 0);
-
-    ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_CFG, ctx->cfg);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_ENC_SET_CFG failed: %d\n", ret);
-        return -1;
-    }
-
-    MppEncHeaderMode header_mode = MPP_ENC_HEADER_MODE_EACH_IDR;
-    ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_HEADER_MODE, &header_mode);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_ENC_SET_HEADER_MODE failed: %d\n", ret);
-    }
-
-    ret = mpp_buffer_group_get_internal(&ctx->buf_grp, MPP_BUFFER_TYPE_DRM);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal failed: %d\n", ret);
-        return -1;
-    }
-
-    return 0;
-}
-
-typedef void (*mpp_encode_cb)(const void *data, size_t size, void *arg);
-
-static int mpp_encode_frame(mpp_ctx_t *ctx, void *data, size_t size, int force_idr, mpp_encode_cb cb, void *cb_arg)
-{
-    MPP_RET ret;
-    MppFrame frame = NULL;
-    MppPacket packet = NULL;
-    MppBuffer frame_buf = NULL;
-    MppMeta meta = NULL;
-    size_t frame_size;
-    void *frame_ptr;
-
-    frame_size = ctx->width * ctx->height * 3;
-
-    ret = mpp_buffer_get(ctx->buf_grp, &frame_buf, frame_size);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_get frame failed: %d\n", ret);
-        return -1;
-    }
-
-    frame_ptr = mpp_buffer_get_ptr(frame_buf);
-    memcpy(frame_ptr, data, size < frame_size ? size : frame_size);
-
-    ret = mpp_frame_init(&frame);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_frame_init failed: %d\n", ret);
-        mpp_buffer_put(frame_buf);
-        return -1;
-    }
-
-    mpp_frame_set_width(frame, ctx->width);
-    mpp_frame_set_height(frame, ctx->height);
-    mpp_frame_set_hor_stride(frame, ctx->width);
-    mpp_frame_set_ver_stride(frame, ctx->height);
-    mpp_frame_set_fmt(frame, ctx->fmt);
-    mpp_frame_set_buffer(frame, frame_buf);
-    mpp_frame_set_eos(frame, 0);
-
-    if (force_idr) {
-        meta = mpp_frame_get_meta(frame);
-        if (meta) {
-            mpp_meta_set_s32(meta, KEY_INPUT_IDR_REQ, 1);
-            printf("Requesting IDR frame via meta\n");
-        }
-    }
-
-    ret = ctx->mpi->encode_put_frame(ctx->ctx, frame);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "encode_put_frame failed: %d\n", ret);
-        mpp_frame_deinit(&frame);
-        mpp_buffer_put(frame_buf);
-        return -1;
-    }
-
-    ret = ctx->mpi->encode_get_packet(ctx->ctx, &packet);
-    if (ret != MPP_OK || !packet) {
-        fprintf(stderr, "encode_get_packet failed: %d\n", ret);
-        mpp_frame_deinit(&frame);
-        if (packet) mpp_packet_deinit(&packet);
-        mpp_buffer_put(frame_buf);
-        return -1;
-    }
-
-    cb(mpp_packet_get_pos(packet), mpp_packet_get_length(packet), cb_arg);
-
-    mpp_frame_deinit(&frame);
-    mpp_packet_deinit(&packet);
-    mpp_buffer_put(frame_buf);
-
-    return 0;
-}
-
-static void mpp_encoder_close(mpp_ctx_t *ctx)
-{
-    if (ctx->cfg) {
-        mpp_enc_cfg_deinit(ctx->cfg);
-    }
-    if (ctx->buf_grp) {
-        mpp_buffer_group_put(ctx->buf_grp);
-    }
-    if (ctx->ctx) {
-        ctx->mpi->reset(ctx->ctx);
-        mpp_destroy(ctx->ctx);
-    }
 }
 
 static void write_output_rename_cb(const void *data, size_t size, void *arg)
@@ -423,8 +210,8 @@ int main(int argc, char *argv[])
 
     unsigned int pixfmt = parse_v4l2_format(format);
     v4l2_capture_t v4l2 = {0};
-    mpp_ctx_t mpp_jpeg = {0};
-    mpp_ctx_t mpp_h264 = {0};
+    mpp_enc_ctx_t mpp_jpeg = {0};
+    mpp_enc_ctx_t mpp_h264 = {0};
     sock_ctx_t jpeg_sock = {0};
     sock_ctx_t mjpeg_sock = {0};
     sock_ctx_t h264_sock = {0};
@@ -446,7 +233,7 @@ int main(int argc, char *argv[])
 
     MppFrameFormat mpp_fmt = v4l2_to_mpp_format(v4l2.pixfmt);
 
-    if (mpp_encoder_init(&mpp_jpeg, v4l2.width, v4l2.height, mpp_fmt, quality) < 0) {
+    if (mpp_jpeg_encoder_init(&mpp_jpeg, v4l2.width, v4l2.height, mpp_fmt, quality) < 0) {
         fprintf(stderr, "Failed to initialize JPEG encoder\n");
         goto error;
     }
@@ -540,14 +327,21 @@ int main(int argc, char *argv[])
         int encoded_any = 0;
 
         if (callback_chain_active(jpeg_chain)) {
-            mpp_encode_frame(&mpp_jpeg, frame_data, bytesused, 0, callback_chain_write_cb, (void *)jpeg_chain);
+            MppPacket packet = mpp_encode_frame(&mpp_jpeg, frame_data, bytesused, 0);
+            if (packet) {
+                callback_chain_write_cb(mpp_packet_get_pos(packet), mpp_packet_get_length(packet), (void *)jpeg_chain);
+                mpp_packet_deinit(&packet);
+            }
             frames_this_jpeg_captured++;
             encoded_any = 1;
         }
 
         if (h264_sock.num_clients > 0) {
-            if (mpp_encode_frame(&mpp_h264, frame_data, bytesused, h264_sock.need_keyframe, sock_write_cb, &h264_sock) == 0) {
+            MppPacket packet = mpp_encode_frame(&mpp_h264, frame_data, bytesused, h264_sock.need_keyframe);
+            if (packet) {
+                sock_write_cb(mpp_packet_get_pos(packet), mpp_packet_get_length(packet), &h264_sock);
                 sock_write_cb(NAL_AUD_FRAME, sizeof(NAL_AUD_FRAME), &h264_sock);
+                mpp_packet_deinit(&packet);
             }
             h264_sock.need_keyframe = false;
             frames_this_h264_captured++;
