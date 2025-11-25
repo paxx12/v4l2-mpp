@@ -21,6 +21,7 @@
 
 #include "v4l2_capture.h"
 #include "sock_ctx.h"
+#include "callback_chain.h"
 
 const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
 
@@ -292,35 +293,6 @@ static void write_output_rename_cb(const void *data, size_t size, void *arg)
     }
 }
 
-typedef struct {
-    void (*cb)(const void *data, size_t size, void *arg);
-    void *arg;
-    bool run;
-} callback_chain_t;
-
-static bool callback_chain_active(callback_chain_t *chain)
-{
-    while (chain->cb) {
-        if (chain->run) {
-            return true;
-        }
-        chain++;
-    }
-    return false;
-}
-
-static void write_callback_chain_cb(const void *data, size_t size, void *arg)
-{
-    callback_chain_t *chain = arg;
-
-    while (chain->cb) {
-        if (chain->run) {
-            chain->cb(data, size, chain->arg);
-        }
-        chain++;
-    }
-}
-
 static void print_usage(const char *prog)
 {
     printf("Usage: %s [options]\n", prog);
@@ -568,7 +540,7 @@ int main(int argc, char *argv[])
         int encoded_any = 0;
 
         if (callback_chain_active(jpeg_chain)) {
-            mpp_encode_frame(&mpp_jpeg, frame_data, bytesused, 0, write_callback_chain_cb, (void *)jpeg_chain);
+            mpp_encode_frame(&mpp_jpeg, frame_data, bytesused, 0, callback_chain_write_cb, (void *)jpeg_chain);
             frames_this_jpeg_captured++;
             encoded_any = 1;
         }
