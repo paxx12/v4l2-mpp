@@ -24,14 +24,8 @@ jobs:
         sudo apt-get install -y build-essential cmake \
           gcc-aarch64-linux-gnu pkg-config
 
-    - name: Compile MPP
-      run: ./deps/compile_mpp.sh
-
-    - name: Compile libdatachannel
-      run: ./deps/compile_libdatachannel.sh
-
-    - name: Compile livemedia
-      run: ./deps/compile_livemedia.sh
+    - name: Compile dependencies
+      run: make deps
 
     - name: Build apps
       run: make
