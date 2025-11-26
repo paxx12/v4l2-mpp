@@ -1,151 +1,184 @@
-HTML_WEBRTC = """<!doctype html>
+HTML_WEBRTC = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC Stream</title>
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
   <style>
-    body {
-      margin:0;
-      padding:0;
-      background-color:#303030;
-    }
-
-    #streamStage {
-      position:fixed;
-      top:0;
-      left:0;
-      width:100%;
-      height:100%;
-    }
-
-    #streamStage:before {
-      content: '';
+    * {
       box-sizing: border-box;
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 2rem;
-      height: 2rem;
-      margin-top: -1rem;
-      margin-left: -1rem;
     }
-
+    body {
+      margin: 0;
+      padding: 0;
+      background: #303030;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #streamStage {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
     #stream {
-      max-height: 100%;
       max-width: 100%;
-      margin: auto;
-      position: absolute;
-      top: 0; left: 0; bottom: 0; right: 0;
+      max-height: 100%;
+      background: #000;
+    }
+    #status {
+      position: fixed;
+      top: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.5rem 1rem;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      border-radius: 0.25rem;
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    #status.show {
+      opacity: 1;
+    }
+    #status.error {
+      background: rgba(220, 38, 38, 0.9);
+    }
+    #status.success {
+      background: rgba(34, 197, 94, 0.9);
     }
   </style>
 </head>
 <body>
-  <div id="streamtage">
-    <video controls autoplay muted playsinline id="stream"></video>
+  <div id="streamStage">
+    <video id="stream" controls autoplay muted playsinline></video>
   </div>
-
+  <div id="status"></div>
   <script>
-    function startWebRTC() {
-        const iceServers = [
-          { urls: ['stun:stun.l.google.com:19302'] }
-        ];
+    (function() {
+      'use strict';
 
-        var pc = null;
+      let peerConnection = null;
+      const statusElement = document.getElementById('status');
+      const videoElement = document.getElementById('stream');
 
-        const urlSearchParams = new URLSearchParams(window.location.search);
-        const params = Object.fromEntries(urlSearchParams.entries());
-
-        const body = {
-          type: 'request',
-          res: params.res,
-          iceServers: iceServers,
-          keepAlive: true
-        };
-        if (params.timeout_s) {
-          body.timeout_s = parseInt(params.timeout_s, 10);
+      function updateStatus(message, type = 'info', duration = 3000) {
+        statusElement.textContent = message;
+        statusElement.className = `show ${type}`;
+        if (duration > 0) {
+          setTimeout(() => statusElement.className = '', duration);
         }
+      }
 
-        fetch(window.location.href, {
-          body: JSON.stringify(body),
-          headers: {
-              'Content-Type': 'application/json'
-          },
-          method: 'POST'
-        }).then(function(response) {
-          return response.json();
-        }).then(function(request) {
-          pc = new RTCPeerConnection({
-            sdpSemantics: 'unified-plan',
-            iceServers: request.iceServers
-          });
-
-          pc.addEventListener('datachannel', function(e) {
-            const dc = e.channel;
-            if (dc.label === 'keepalive') {
-              dc.addEventListener('message', function(e) {
-                dc.send('pong');
-              });
-            }
-          });
-
-          pc.remote_pc_id = request.id;
-          pc.addTransceiver('video', { direction: 'recvonly' });
-          pc.addEventListener('track', function(evt) {
-            if (document.getElementById('stream'))
-              document.getElementById('stream').srcObject = evt.streams[0];
-          });
-          pc.addEventListener("icecandidate", function(e) {
-            if (e.candidate) {
-              return fetch(window.location.href, {
-                body: JSON.stringify({
-                  type: 'remote_candidate',
-                  id: pc.remote_pc_id,
-                  candidates: [e.candidate]
-                }),
-                headers: { 'Content-Type': 'application/json' },
-                method: 'POST'
-              }).catch(function(e) {
-                console.log("Failed to send ICE WebRTC: "+e);
-              });
-            }
-          });
-
-          return pc.setRemoteDescription(request);
-        }).then(function() {
-          return pc.createAnswer();
-        }).then(function(answer) {
-          return pc.setLocalDescription(answer);
-        }).then(function() {
-          var offer = pc.localDescription;
-
-          return fetch(window.location.href, {
-            body: JSON.stringify({
-              type: offer.type,
-              id: pc.remote_pc_id,
-              sdp: offer.sdp,
-            }),
-            headers: { 'Content-Type': 'application/json' },
-            method: 'POST'
-          })
-        }).then(function(response) {
-          return response.json();
-        }).catch(function(e) {
-          console.log(e);
+      async function sendRequest(body) {
+        const response = await fetch(window.location.href, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
         });
-    }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+      }
 
-    function stopWebRTC() {
-      setTimeout(function() {
-        pc.close();
-      }, 500);
-    }
-  </script>
+      async function initializeStream() {
+        try {
+          updateStatus('Connecting...', 'info', 0);
 
-  <script>
-    window.onload = function() {
-      startWebRTC();
-    }
+          const urlParams = new URLSearchParams(window.location.search);
+          const params = Object.fromEntries(urlParams.entries());
+
+          const requestBody = {
+            type: 'request',
+            res: params.res,
+            iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+            keepAlive: true
+          };
+
+          if (params.timeout_s) {
+            requestBody.timeout_s = parseInt(params.timeout_s, 10);
+          }
+
+          const offer = await sendRequest(requestBody);
+
+          peerConnection = new RTCPeerConnection({
+            sdpSemantics: 'unified-plan',
+            iceServers: offer.iceServers
+          });
+
+          peerConnection.remote_pc_id = offer.id;
+
+          peerConnection.onconnectionstatechange = () => {
+            const state = peerConnection.connectionState;
+            if (state === 'connected') {
+              updateStatus('Connected', 'success', 2000);
+            } else if (state === 'failed' || state === 'disconnected') {
+              updateStatus('Connection lost', 'error', 0);
+            } else if (state === 'connecting') {
+              updateStatus('Connecting...', 'info', 0);
+            }
+          };
+
+          peerConnection.ondatachannel = (event) => {
+            const channel = event.channel;
+            if (channel.label === 'keepalive') {
+              channel.onmessage = () => channel.send('pong');
+            }
+          };
+
+          peerConnection.addTransceiver('video', { direction: 'recvonly' });
+
+          peerConnection.ontrack = (event) => {
+            if (event.streams[0]) {
+              videoElement.srcObject = event.streams[0];
+            }
+          };
+
+          peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+              sendRequest({
+                type: 'remote_candidate',
+                id: peerConnection.remote_pc_id,
+                candidates: [event.candidate]
+              }).catch(error => {
+                console.error('ICE candidate error:', error);
+              });
+            }
+          };
+
+          await peerConnection.setRemoteDescription(offer);
+
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+
+          await sendRequest({
+            type: peerConnection.localDescription.type,
+            id: peerConnection.remote_pc_id,
+            sdp: peerConnection.localDescription.sdp
+          });
+
+        } catch (error) {
+          console.error('WebRTC error:', error);
+          updateStatus(`Error: ${error.message}`, 'error', 0);
+        }
+      }
+
+      function cleanup() {
+        if (peerConnection) {
+          peerConnection.close();
+          peerConnection = null;
+        }
+      }
+
+      window.addEventListener('load', initializeStream);
+      window.addEventListener('beforeunload', cleanup);
+
+    })();
   </script>
 </body>
 </html>
