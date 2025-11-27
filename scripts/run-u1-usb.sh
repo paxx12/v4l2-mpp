@@ -40,10 +40,5 @@ $RUNCMD -c "$DIR/stream-rtsp \
     --rtsp-port 8555" &
 PIDS="$PIDS $!"
 
-$RUNCMD -c "$DIR/stream-snap-mqtt.py \
-    --jpeg-sock /tmp/capture-usb-jpeg.sock \
-    --publish-dir /home/lava/printer_data/camera" &
-PIDS="$PIDS $!"
-
 wait -n
 echo "One of the processes has exited, cleaning up..."

@@ -1,4 +1,4 @@
-APPS = stream-http stream-snap-mqtt fake-service
+APPS = stream-http fake-service
 APPS_DIR = apps
 
 ifneq (x,x$(wildcard deps/mpp/usr-local/lib/librockchip_mpp.a))
