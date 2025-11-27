@@ -105,7 +105,7 @@ def handle_start_timelapse(request_id, params):
             json.dump(config, f, indent=4)
 
         with open(tl_dir / "state", "w") as f:
-            f.write("ACTIVATED")
+            f.write("READY")
 
         current_link.symlink_to(idx)
 
@@ -180,6 +180,9 @@ def generate_video(tl_dir):
         return
     with open(config_path, "r") as f:
         config = json.load(f)
+
+    with open(tl_dir / "state", "w") as f:
+        f.write("GENERATING")
 
     # Get frame count
     frame_count = 0
@@ -258,7 +261,7 @@ def generate_video(tl_dir):
     send_notification("notify_camera_generate_video_progress", [{"percent": 80, "state": "generating"}])
 
     # Remove jpg (only keep video and thumbnail)
-    for frame_idx in range(frame_count):
+    for frame_idx in range(1, frame_count):
         jpg_file = tl_dir / f"{frame_idx}.jpg"
         try:
             jpg_file.unlink()
@@ -280,7 +283,7 @@ def finish_all_timelapses():
         with open(state_file, "r") as f:
             state = f.read().strip()
 
-        if state != "ACTIVATED":
+        if state not in ("READY", "ACTIVATED", "GENERATING"):
             continue
 
         log(f"Finishing timelapse in {tl_dir}")
@@ -298,12 +301,21 @@ def handle_take_photo(request_id, params):
             send_error(request_id, -1, "No active timelapse for printing snapshot")
             return
 
+        tl_dir = current_link.resolve()
+        state_file = tl_dir / "state"
+        if state_file.exists():
+            with open(state_file, "r") as f:
+                state = f.read().strip()
+            if state == "READY":
+                with open(state_file, "w") as f:
+                    f.write("ACTIVATED")
+
         try:
             index_next = str(current_link / "indexNext")
             with open(index_next, "r") as f:
                 frame_num = int(f.read().strip())
         except Exception as e:
-            frame_num = 0
+            frame_num = 1
         filepath = str(current_link / f"{frame_num}.jpg")
 
     if not filepath:
