@@ -42,6 +42,9 @@ case "$1" in
     json='{"jsonrpc": "2.0", "method": "camera.delete_timelapse_instance", "params": {"date_index": "20251128114804"}, "id": 10}'
     # camera/response {"id":10,"jsonrpc":"2.0","result":{"state":"success"}}
     ;;
+  detect-capture)
+    json='{"jsonrpc": "2.0", "method": "camera.detect_capture", "params": {}, "id": 6489}'
+    ;;
   simulate-timelapse)
     export ONLY_RESPONSE=1
     mosquitto_sub -v -h localhost -t camera/# &
@@ -57,7 +60,7 @@ case "$1" in
     ;;
 
   *)
-    echo "Usage: $0 {start-timelapse|stop-timelapse|start-monitor|stop-monitor|take-photo|get-status|get-timelapse-instance|delete-timelapse-instance|simulate-timelapse}"
+    echo "Usage: $0 {start-timelapse|stop-timelapse|start-monitor|stop-monitor|take-photo|get-status|get-timelapse-instance|delete-timelapse-instance|detect-capture|simulate-timelapse}"
     exit 1
     ;;
 esac
