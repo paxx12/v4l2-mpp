@@ -30,6 +30,10 @@ case "$1" in
     json='{"jsonrpc": "2.0", "method": "camera.take_a_photo", "params": {"reason": "printing", "timestamp": false, "filepath": "/tmp/tmp.jpg"}, "id": 6488}'
     # camera/response {"id":6488,"jsonrpc":"2.0","result":{"state":"success"}}
     ;;
+  get-status)
+    json='{"jsonrpc": "2.0", "method": "camera.get_status", "params": {}, "id": 6488}'
+    # camera/response {"id":6488,"jsonrpc":"2.0","result":{"interface_type":"MIPI","monitoring":false,"state":"success","timelapse":false}}
+    ;;
   simulate-timelapse)
     export ONLY_RESPONSE=1
     mosquitto_sub -v -h localhost -t camera/# &
@@ -45,7 +49,7 @@ case "$1" in
     ;;
 
   *)
-    echo "Usage: $0 {start-timelapse|stop-timelapse|start-monitor|stop-monitor|take-photo|simulate-timelapse}"
+    echo "Usage: $0 {start-timelapse|stop-timelapse|start-monitor|stop-monitor|take-photo|get-status|simulate-timelapse}"
     exit 1
     ;;
 esac

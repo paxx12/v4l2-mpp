@@ -297,6 +297,29 @@ def finish_all_timelapses():
         log(f"Finishing timelapse in {tl_dir}")
         generate_video(tl_dir)
 
+def handle_get_status(request_id, params):
+    monitoring = snapshot_interval >= 0
+
+    current_link = Path(args.timelapse_dir) / "current"
+    timelapse = current_link.exists() and current_link.is_symlink()
+
+    interface_type = "unknown"
+    if args.jpeg_sock:
+        sock_lower = args.jpeg_sock.lower()
+        if "mipi" in sock_lower:
+            interface_type = "MIPI"
+        elif "usb" in sock_lower:
+            interface_type = "USB"
+
+    result = {
+        "interface_type": interface_type,
+        "monitoring": monitoring,
+        "state": "success",
+        "timelapse": timelapse
+    }
+
+    send_response(request_id, result)
+
 def handle_take_photo(request_id, params):
     filepath = params.get("filepath")
     index_next = None
@@ -397,6 +420,7 @@ METHODS = {
     "camera.start_monitor": handle_start_monitor,
     "camera.stop_monitor": handle_stop_monitor,
     "camera.take_a_photo": handle_take_photo,
+    "camera.get_status": handle_get_status,
 }
 
 def on_connect(c, userdata, flags, rc):
