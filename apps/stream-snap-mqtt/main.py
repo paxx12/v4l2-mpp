@@ -200,14 +200,6 @@ def generate_video(tl_dir):
     with open(tl_dir / "state", "w") as f:
         f.write("GENERATING")
 
-    # Get frame count
-    frame_count = 0
-    try:
-        with open(tl_dir / "indexNext", "r") as f:
-            frame_count = int(f.read().strip())
-    except Exception as e:
-        log(f"Failed to read frame count: {e}")
-
     # Get video parameters
     frame_rate = config.get("frame_rate", 24)
     mode = config.get("mode", "classic")
@@ -416,6 +408,7 @@ def on_connect(c, userdata, flags, rc):
         log(f"Connection failed: {rc}")
 
 def on_message(c, userdata, msg):
+    request_id = None
     try:
         payload = msg.payload.decode('utf-8')
         log(f"Request: {payload}")
@@ -431,8 +424,12 @@ def on_message(c, userdata, msg):
             send_error(request_id, -32601, f"Method not found: {method}")
     except json.JSONDecodeError as e:
         log(f"Invalid JSON: {e}")
+        if request_id is not None:
+            send_error(request_id, -32700, f"Parse error: {str(e)}")
     except Exception as e:
         log(f"Error handling message: {e}")
+        if request_id is not None:
+            send_error(request_id, -32603, f"Internal error: {str(e)}")
 
 def main():
     global args, client
