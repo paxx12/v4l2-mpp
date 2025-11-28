@@ -63,6 +63,7 @@ HTML_WEBRTC = """<!DOCTYPE html>
       'use strict';
 
       let peerConnection = null;
+      let reconnectTimeout = null;
       const statusElement = document.getElementById('status');
       const videoElement = document.getElementById('stream');
 
@@ -117,8 +118,19 @@ HTML_WEBRTC = """<!DOCTYPE html>
             const state = peerConnection.connectionState;
             if (state === 'connected') {
               updateStatus('Connected', 'success', 2000);
+              if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+              }
             } else if (state === 'failed' || state === 'disconnected') {
-              updateStatus('Connection lost', 'error', 0);
+              updateStatus('Connection lost, reconnecting in 3s...', 'error', 0);
+              if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+              }
+              reconnectTimeout = setTimeout(() => {
+                cleanup();
+                initializeStream();
+              }, 3000);
             } else if (state === 'connecting') {
               updateStatus('Connecting...', 'info', 0);
             }
@@ -164,11 +176,22 @@ HTML_WEBRTC = """<!DOCTYPE html>
 
         } catch (error) {
           console.error('WebRTC error:', error);
-          updateStatus(`Error: ${error.message}`, 'error', 0);
+          updateStatus(`Error: ${error.message}, retrying in 3s...`, 'error', 0);
+          if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+          }
+          reconnectTimeout = setTimeout(() => {
+            cleanup();
+            initializeStream();
+          }, 3000);
         }
       }
 
       function cleanup() {
+        if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout);
+          reconnectTimeout = null;
+        }
         if (peerConnection) {
           peerConnection.close();
           peerConnection = null;
