@@ -41,7 +41,7 @@ static int v4l2_ioctl(int fd, int request, void *arg)
     return r;
 }
 
-static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned int width, unsigned int height, unsigned int pixfmt, unsigned int fps)
+static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned int width, unsigned int height, unsigned int pixfmt, unsigned int fps, unsigned int requested_planes)
 {
     struct v4l2_capability cap;
     struct v4l2_format fmt;
@@ -100,12 +100,12 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
         ctx->width = fmt.fmt.pix_mp.width;
         ctx->height = fmt.fmt.pix_mp.height;
         ctx->pixfmt = fmt.fmt.pix_mp.pixelformat;
-        ctx->num_planes = fmt.fmt.pix_mp.num_planes;
+        ctx->num_planes = (requested_planes > 0) ? requested_planes : fmt.fmt.pix_mp.num_planes;
     } else {
         ctx->width = fmt.fmt.pix.width;
         ctx->height = fmt.fmt.pix.height;
         ctx->pixfmt = fmt.fmt.pix.pixelformat;
-        ctx->num_planes = 1;
+        ctx->num_planes = (requested_planes > 0) ? requested_planes : 1;
     }
 
     printf("V4L2: %ux%u format=0x%08x planes=%u\n", ctx->width, ctx->height, ctx->pixfmt, ctx->num_planes);
