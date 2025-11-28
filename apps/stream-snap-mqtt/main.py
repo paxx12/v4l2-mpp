@@ -173,7 +173,23 @@ def handle_stop_timelapse(request_id, params):
             send_error(request_id, -1, "No active timelapse")
 
 def generate_video(tl_dir):
-    # Load config
+    frame_count = 0
+    try:
+        with open(tl_dir / "indexNext", "r") as f:
+            frame_count = int(f.read().strip())
+    except Exception as e:
+        log(f"Failed to read frame count: {e}")
+
+    if frame_count <= 0:
+        log(f"Invalid frame count {frame_count}, cleaning up {tl_dir}")
+        try:
+            import shutil
+            shutil.rmtree(tl_dir)
+            log(f"Removed timelapse folder: {tl_dir}")
+        except Exception as cleanup_err:
+            log(f"Failed to cleanup {tl_dir}: {cleanup_err}")
+        return
+
     config_path = tl_dir / "config.json"
     if not config_path.exists():
         log(f"No config found in {tl_dir}, skipping video generation")
