@@ -352,6 +352,56 @@ def handle_get_status(request_id, params):
 
     send_response(request_id, result)
 
+def delete_timelapse_instance(date_index):
+    errors = []
+    tl_dir = Path(args.timelapse_dir) / date_index
+
+    current_link = Path(args.timelapse_dir) / "current"
+    if current_link.exists() and current_link.is_symlink():
+        if current_link.resolve() == tl_dir:
+            errors.append(f"Cannot delete active timelapse: {date_index}")
+            return errors
+
+    if tl_dir.exists() and tl_dir.is_dir():
+        try:
+            import shutil
+            shutil.rmtree(tl_dir)
+            log(f"Deleted timelapse directory: {tl_dir}")
+        except Exception as e:
+            errors.append(f"Failed to delete directory {tl_dir}: {e}")
+
+    try:
+        timelapse_data = read_timelapse_data()
+        timelapse_data["instances"] = [i for i in timelapse_data.get("instances", []) if i.get("date_index") != date_index]
+        timelapse_data["count"] = len(timelapse_data["instances"])
+        write_timelapse_data(timelapse_data)
+        log(f"Removed instance {date_index} from timelapse.json")
+    except Exception as e:
+        errors.append(f"Failed to update timelapse.json: {e}")
+
+    if args.publish_dir:
+        publish_dir = Path(args.publish_dir)
+        for file in publish_dir.glob(f"*_{date_index}.*"):
+            try:
+                file.unlink()
+                log(f"Removed published file: {file}")
+            except Exception as e:
+                errors.append(f"Failed to remove {file}: {e}")
+
+    return errors
+
+def handle_delete_timelapse_instance(request_id, params):
+    date_index = params.get("date_index")
+    if not date_index:
+        send_error(request_id, -32602, "Missing required parameter: date_index")
+        return
+
+    errors = delete_timelapse_instance(date_index)
+    if errors:
+        send_error(request_id, -32603, "; ".join(errors))
+    else:
+        send_response(request_id, {"state": "success"})
+
 def handle_take_photo(request_id, params):
     filepath = params.get("filepath")
     index_next = None
@@ -453,6 +503,7 @@ METHODS = {
     "camera.stop_monitor": handle_stop_monitor,
     "camera.take_a_photo": handle_take_photo,
     "camera.get_timelapse_instance": handle_get_timelapse_instance,
+    "camera.delete_timelapse_instance": handle_delete_timelapse_instance,
     "camera.get_status": handle_get_status,
 }
 

@@ -38,6 +38,10 @@ case "$1" in
     json='{"jsonrpc": "2.0", "method": "camera.get_timelapse_instance", "params": {"page_index": 1, "page_rows": 10}, "id": 8}'
     # camera/response {"id":8,"jsonrpc":"2.0","result":{"count":2,"instances":[{"date_index":"20251128114039","gcode_name":"OrcaCube_PETG_7m5s","gcode_path":"/home/lava/printer_data/gcodes/OrcaCube_PETG_7m5s.gcode","generate_date":"2025-11-28","thumbnail_path":"/userdata/.tmp_timelapse/20251128114039/thumbnail.jpg","timelapse_dir":"/userdata/.tmp_timelapse/20251128114039","video_duration":"00:00","video_path":"/userdata/.tmp_timelapse/20251128114039/timelapse_f6_r24_classic.mp4"}],"page_index":1,"page_rows":10,"state":"success","total_count":2}}
     ;;
+  delete-timelapse-instance)
+    json='{"jsonrpc": "2.0", "method": "camera.delete_timelapse_instance", "params": {"date_index": "20251128114804"}, "id": 10}'
+    # camera/response {"id":10,"jsonrpc":"2.0","result":{"state":"success"}}
+    ;;
   simulate-timelapse)
     export ONLY_RESPONSE=1
     mosquitto_sub -v -h localhost -t camera/# &
@@ -53,7 +57,7 @@ case "$1" in
     ;;
 
   *)
-    echo "Usage: $0 {start-timelapse|stop-timelapse|start-monitor|stop-monitor|take-photo|get-status|get-timelapse-instance|simulate-timelapse}"
+    echo "Usage: $0 {start-timelapse|stop-timelapse|start-monitor|stop-monitor|take-photo|get-status|get-timelapse-instance|delete-timelapse-instance|simulate-timelapse}"
     exit 1
     ;;
 esac
