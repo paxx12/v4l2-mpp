@@ -77,9 +77,10 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
     MppPacket packet = NULL;
     MppFrame frame = NULL;
     size_t frame_size;
+    unsigned int hor_stride = mpp_align_up(ctx->width, 64);
+    unsigned int ver_stride = mpp_align_up(ctx->height, 64);
 
-    // 2 bytes per pixel for YUV420SP
-    frame_size = mpp_align_up(ctx->width, 16) * mpp_align_up(ctx->height, 16) * 2;
+    frame_size = hor_stride * ver_stride * 2;
 
     ret = mpp_buffer_get(ctx->pkt_grp, &pkt_buf, size);
     if (ret != MPP_OK) {
@@ -113,6 +114,11 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
         mpp_buffer_put(frm_buf);
         return NULL;
     }
+    mpp_frame_set_width(frame, ctx->width);
+    mpp_frame_set_height(frame, ctx->height);
+    mpp_frame_set_hor_stride(frame, hor_stride);
+    mpp_frame_set_ver_stride(frame, ver_stride);
+    mpp_frame_set_fmt(frame, MPP_FMT_YUV420SP);
     mpp_frame_set_buffer(frame, frm_buf);
 
     ret = ctx->mpi->poll(ctx->ctx, MPP_PORT_INPUT, MPP_POLL_BLOCK);
