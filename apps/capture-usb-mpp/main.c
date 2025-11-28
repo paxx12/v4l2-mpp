@@ -192,7 +192,7 @@ int main(int argc, char *argv[])
     }
 
     if (h264_stream) {
-        if (mpp_jpeg_decoder_init(&mpp_dec, v4l2.width, v4l2.height) < 0) {
+        if (mpp_jpeg_decoder_init(&mpp_dec, v4l2.width, v4l2.height, MPP_FMT_YUV420SP) < 0) {
             fprintf(stderr, "Failed to initialize JPEG decoder\n");
             goto error;
         }

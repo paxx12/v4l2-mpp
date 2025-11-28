@@ -16,6 +16,7 @@ typedef struct {
     MppBufferGroup pkt_grp;
     unsigned int width;
     unsigned int height;
+    MppFrameFormat format;
 } mpp_dec_ctx_t;
 
 __attribute__((unused)) static unsigned int mpp_align_up(unsigned int value, unsigned int align)
@@ -23,12 +24,13 @@ __attribute__((unused)) static unsigned int mpp_align_up(unsigned int value, uns
     return (value + align - 1) & ~(align - 1);
 }
 
-__attribute__((unused)) static int mpp_jpeg_decoder_init(mpp_dec_ctx_t *ctx, unsigned int width, unsigned int height)
+__attribute__((unused)) static int mpp_jpeg_decoder_init(mpp_dec_ctx_t *ctx, unsigned int width, unsigned int height, MppFrameFormat fmt)
 {
     MPP_RET ret;
 
     ctx->width = width;
     ctx->height = height;
+    ctx->format = fmt;
 
     ret = mpp_create(&ctx->ctx, &ctx->mpi);
     if (ret != MPP_OK) {
@@ -44,13 +46,21 @@ __attribute__((unused)) static int mpp_jpeg_decoder_init(mpp_dec_ctx_t *ctx, uns
 
     MppDecCfg cfg = NULL;
     mpp_dec_cfg_init(&cfg);
-    mpp_dec_cfg_set_u32(cfg, "base:out_fmt", MPP_FMT_YUV420SP);
+    mpp_dec_cfg_set_u32(cfg, "base:out_fmt", fmt);
     ret = ctx->mpi->control(ctx->ctx, MPP_DEC_SET_CFG, cfg);
     mpp_dec_cfg_deinit(cfg);
 
     if (ret != MPP_OK) {
         fprintf(stderr, "MPP_DEC_SET_CFG failed: %d\n", ret);
         return -1;
+    }
+
+    if (MPP_FRAME_FMT_IS_YUV(fmt) || MPP_FRAME_FMT_IS_RGB(fmt)) {
+        ret = ctx->mpi->control(ctx->ctx, MPP_DEC_SET_OUTPUT_FORMAT, &fmt);
+        if (ret != MPP_OK) {
+            fprintf(stderr, "Failed to set output format 0x%x\n", fmt);
+            return -1;
+        }
     }
 
     ret = mpp_buffer_group_get_internal(&ctx->pkt_grp, MPP_BUFFER_TYPE_ION);
@@ -77,8 +87,8 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
     MppPacket packet = NULL;
     MppFrame frame = NULL;
     size_t frame_size;
-    unsigned int hor_stride = mpp_align_up(ctx->width, 64);
-    unsigned int ver_stride = mpp_align_up(ctx->height, 64);
+    unsigned int hor_stride = mpp_align_up(ctx->width, 16);
+    unsigned int ver_stride = mpp_align_up(ctx->height, 16);
 
     frame_size = hor_stride * ver_stride * 2;
 
@@ -118,7 +128,7 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
     mpp_frame_set_height(frame, ctx->height);
     mpp_frame_set_hor_stride(frame, hor_stride);
     mpp_frame_set_ver_stride(frame, ver_stride);
-    mpp_frame_set_fmt(frame, MPP_FMT_YUV420SP);
+    mpp_frame_set_fmt(frame, ctx->format);
     mpp_frame_set_buffer(frame, frm_buf);
 
     ret = ctx->mpi->poll(ctx->ctx, MPP_PORT_INPUT, MPP_POLL_BLOCK);
