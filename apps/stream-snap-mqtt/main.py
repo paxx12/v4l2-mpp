@@ -306,6 +306,29 @@ def finish_all_timelapses():
             log(f"Finishing timelapse in {tl_dir}")
             generate_video(tl_dir)
 
+def handle_get_timelapse_instance(request_id, params):
+    page_index = params.get("page_index", 1)
+    page_rows = params.get("page_rows", 10)
+
+    timelapse_data = read_timelapse_data()
+    instances = timelapse_data.get("instances", [])
+    total_count = len(instances)
+
+    start_idx = (page_index - 1) * page_rows
+    end_idx = start_idx + page_rows
+    page_instances = instances[start_idx:end_idx]
+
+    result = {
+        "count": len(page_instances),
+        "instances": page_instances,
+        "page_index": page_index,
+        "page_rows": page_rows,
+        "state": "success",
+        "total_count": total_count
+    }
+
+    send_response(request_id, result)
+
 def handle_get_status(request_id, params):
     monitoring = snapshot_interval >= 0
 
@@ -429,6 +452,7 @@ METHODS = {
     "camera.start_monitor": handle_start_monitor,
     "camera.stop_monitor": handle_stop_monitor,
     "camera.take_a_photo": handle_take_photo,
+    "camera.get_timelapse_instance": handle_get_timelapse_instance,
     "camera.get_status": handle_get_status,
 }
 
