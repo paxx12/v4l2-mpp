@@ -1,9 +1,10 @@
 TARGET = stream-rtsp
 SRCS = main.cpp
 OBJS = $(SRCS:.cpp=.o)
+DEPS = $(SRCS:.cpp=.d)
 
 CXX ?= g++
-CXXFLAGS ?= -Wall -Wextra -O2 -std=c++17 -I../../common/stream-common
+CXXFLAGS ?= -Wall -Wextra -O2 -MMD -std=c++17 -I../../common/stream-common
 LDFLAGS ?= -static-libstdc++
 
 LIVE555_PATH ?= ../../deps/live/usr-local/
@@ -22,6 +23,8 @@ BINDIR ?= $(PREFIX)/bin
 
 all: $(TARGET)
 
+-include $(DEPS)
+
 $(TARGET): $(OBJS)
 	$(CXX) $^ -o $@ $(LDFLAGS)
 
@@ -29,7 +32,7 @@ $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(DEPS) $(TARGET)
 
 install: $(TARGET)
 	install -d $(DESTDIR)$(BINDIR)

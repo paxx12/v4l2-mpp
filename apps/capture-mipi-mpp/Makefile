@@ -1,9 +1,10 @@
 TARGET = capture-mipi-mpp
 SRCS = main.c
 OBJS = $(SRCS:.c=.o)
+DEPS = $(SRCS:.c=.d)
 
 CC ?= gcc
-CFLAGS ?= -Wall -Wextra -O2 -I../../common/capture-common
+CFLAGS ?= -Wall -Wextra -O2 -MMD -I../../common/capture-common
 LDFLAGS ?=
 
 ifneq (x,x$(wildcard $(CURDIR)/../../deps/mpp/usr-local/lib/pkgconfig))
@@ -18,6 +19,8 @@ BINDIR ?= $(PREFIX)/bin
 
 all: $(TARGET)
 
+-include $(DEPS)
+
 $(TARGET): $(OBJS)
 	$(CC) $^ -o $@ $(LDFLAGS)
 
@@ -25,7 +28,7 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(DEPS) $(TARGET)
 
 install: $(TARGET)
 	install -d $(DESTDIR)$(BINDIR)
