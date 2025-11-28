@@ -304,7 +304,10 @@ def finish_all_timelapses():
         state_file = tl_dir / "state"
         if not state_file.exists():
             log(f"Deleting timelapse without state file: {tl_dir}")
-            delete_timelapse_instance(tl_dir.name)
+            errors = delete_timelapse_instance(tl_dir.name)
+            if errors:
+                for error in errors:
+                    log(error)
             continue
         with open(state_file, "r") as f:
             state = f.read().strip()
@@ -314,7 +317,10 @@ def finish_all_timelapses():
             generate_video(tl_dir)
         elif state == "FINISHED" and tl_dir.name not in valid_instances:
             log(f"Deleting orphaned finished timelapse: {tl_dir}")
-            delete_timelapse_instance(tl_dir.name)
+            errors = delete_timelapse_instance(tl_dir.name)
+            if errors:
+                for error in errors:
+                    log(error)
 
 def handle_get_timelapse_instance(request_id, params):
     page_index = params.get("page_index", 1)
