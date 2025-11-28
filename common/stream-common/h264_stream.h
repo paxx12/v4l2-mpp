@@ -71,7 +71,14 @@ static ssize_t h264_stream_process(h264_stream_t *stream, void (*store_frame)(co
         if (n == EAGAIN || n == EWOULDBLOCK) {
             return -1;
         }
-        std::perror("read");
+        std::cerr << "Error reading from H264 socket: " << strerror(errno) << std::endl;
+        close(stream->fd);
+        stream->fd = -1;
+        return -1;
+    }
+
+    if (n == 0) {
+        std::cerr << "H264 socket closed by peer" << std::endl;
         close(stream->fd);
         stream->fd = -1;
         return -1;
