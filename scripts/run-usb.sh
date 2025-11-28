@@ -8,6 +8,7 @@ cleanup() {
 }
 
 trap cleanup INT TERM EXIT
+umask 0022
 
 RUNCMD="bash"
 if id -u lava &> /dev/null; then

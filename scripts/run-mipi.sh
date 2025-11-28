@@ -8,6 +8,7 @@ cleanup() {
 }
 
 trap cleanup INT TERM EXIT
+umask 0022
 
 RUNCMD="bash"
 if id -u lava &> /dev/null; then
@@ -34,7 +35,7 @@ $RUNCMD -c "$DIR/stream-http.py \
     --webrtc-sock /tmp/capture-mipi-webrtc.sock" &
 PIDS="$PIDS $!"
 
-$RUNCMD -c "$DIR/stream-snap-mqtt.py \
+bash -c "$DIR/stream-snap-mqtt.py \
     --jpeg-sock /tmp/capture-mipi-jpeg.sock \
     --publish-dir /home/lava/printer_data/camera" &
 PIDS="$PIDS $!"
