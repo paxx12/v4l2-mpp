@@ -18,6 +18,11 @@ typedef struct {
     unsigned int height;
 } mpp_dec_ctx_t;
 
+__attribute__((unused)) static unsigned int mpp_align_up(unsigned int value, unsigned int align)
+{
+    return (value + align - 1) & ~(align - 1);
+}
+
 __attribute__((unused)) static int mpp_jpeg_decoder_init(mpp_dec_ctx_t *ctx, unsigned int width, unsigned int height)
 {
     MPP_RET ret;
@@ -73,7 +78,8 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
     MppFrame frame = NULL;
     size_t frame_size;
 
-    frame_size = ctx->width * ctx->height * 2;
+    // 2 bytes per pixel for YUV420SP
+    frame_size = mpp_align_up(ctx->width, 16) * mpp_align_up(ctx->height, 16) * 2;
 
     ret = mpp_buffer_get(ctx->pkt_grp, &pkt_buf, size);
     if (ret != MPP_OK) {
