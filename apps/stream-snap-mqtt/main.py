@@ -134,22 +134,30 @@ def publish_timelapse(gcode_name, date_index, video_path, thumb_path):
         thumb_link.symlink_to(thumb_path)
         log(f"Published: {thumb_link}")
 
-def add_instance_to_timelapse_json(instance):
+def read_timelapse_data():
     timelapse_json_path = Path(args.timelapse_dir) / "timelapse.json"
     timelapse_data = {"count": 0, "instances": []}
     if timelapse_json_path.exists():
         try:
             with open(timelapse_json_path, "r") as f:
                 timelapse_data = json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"Failed to read timelapse.json: {e}")
+    return timelapse_data
+
+def write_timelapse_data(timelapse_data):
+    timelapse_json_path = Path(args.timelapse_dir) / "timelapse.json"
+    with open(timelapse_json_path, "w") as f:
+        json.dump(timelapse_data, f, indent=4)
+
+def add_instance_to_timelapse_json(instance):
+    timelapse_data = read_timelapse_data()
 
     timelapse_data["instances"] = [i for i in timelapse_data.get("instances", []) if i.get("date_index") != instance.get("date_index")]
     timelapse_data["instances"].append(instance)
     timelapse_data["count"] = len(timelapse_data["instances"])
 
-    with open(timelapse_json_path, "w") as f:
-        json.dump(timelapse_data, f, indent=4)
+    write_timelapse_data(timelapse_data)
 
 def finish_timelapse():
     current_link = Path(args.timelapse_dir) / "current"
@@ -281,6 +289,9 @@ def generate_video(tl_dir):
     log(f"Video generation completed: {video_path}")
 
 def finish_all_timelapses():
+    timelapse_data = read_timelapse_data()
+    valid_instances = {inst.get("date_index") for inst in timelapse_data.get("instances", [])}
+
     for tl_dir in Path(args.timelapse_dir).iterdir():
         if not tl_dir.is_dir():
             continue
@@ -291,11 +302,9 @@ def finish_all_timelapses():
         with open(state_file, "r") as f:
             state = f.read().strip()
 
-        if state not in ("READY", "ACTIVATED", "GENERATING"):
-            continue
-
-        log(f"Finishing timelapse in {tl_dir}")
-        generate_video(tl_dir)
+        if state in ("READY", "ACTIVATED", "GENERATING"):
+            log(f"Finishing timelapse in {tl_dir}")
+            generate_video(tl_dir)
 
 def handle_get_status(request_id, params):
     monitoring = snapshot_interval >= 0
