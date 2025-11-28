@@ -292,12 +292,19 @@ def finish_all_timelapses():
     timelapse_data = read_timelapse_data()
     valid_instances = {inst.get("date_index") for inst in timelapse_data.get("instances", [])}
 
+    current_link = Path(args.timelapse_dir) / "current"
+    if current_link.exists():
+        current_link.unlink()
+        log(f"Removed current symlink")
+
     for tl_dir in Path(args.timelapse_dir).iterdir():
         if not tl_dir.is_dir():
             continue
 
         state_file = tl_dir / "state"
         if not state_file.exists():
+            log(f"Deleting timelapse without state file: {tl_dir}")
+            delete_timelapse_instance(tl_dir.name)
             continue
         with open(state_file, "r") as f:
             state = f.read().strip()
@@ -305,6 +312,9 @@ def finish_all_timelapses():
         if state in ("READY", "ACTIVATED", "GENERATING"):
             log(f"Finishing timelapse in {tl_dir}")
             generate_video(tl_dir)
+        elif state == "FINISHED" and tl_dir.name not in valid_instances:
+            log(f"Deleting orphaned finished timelapse: {tl_dir}")
+            delete_timelapse_instance(tl_dir.name)
 
 def handle_get_timelapse_instance(request_id, params):
     page_index = params.get("page_index", 1)
