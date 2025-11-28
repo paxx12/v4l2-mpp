@@ -44,6 +44,7 @@ case "$1" in
     ;;
   detect-capture)
     json='{"jsonrpc": "2.0", "method": "camera.detect_capture", "params": {}, "id": 6489}'
+    # camera/response camera/response {"id":6489,"jsonrpc":"2.0","result":{"clean_bed":{"max_prob":0.0017999999690800905,"obj_areas":0.0,"obj_cnts":0,"obj_probs":0.0},"err_code":0,"noodle":{"max_prob":0.5741999745368958,"obj_areas":0.0503,"obj_cnts":1,"obj_probs":0.5742},"residue":{"max_prob":0.24580000340938568,"obj_areas":0.0,"obj_cnts":0,"obj_probs":0.0},"state":"success"}}
     ;;
   simulate-timelapse)
     export ONLY_RESPONSE=1

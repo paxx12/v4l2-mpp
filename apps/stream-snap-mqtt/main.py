@@ -63,7 +63,34 @@ def read_socket(sock_path, chunk_size=65536):
     finally:
         sock.close()
 
-def take_snapshot(filepath):
+def send_detect_request(sock_path, image_path):
+    if not sock_path:
+        return {"error": "Detection socket not configured"}
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(sock_path)
+        request = json.dumps({"image": image_path})
+        sock.sendall(request.encode('utf-8'))
+        sock.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        sock.close()
+        response = b''.join(chunks).decode('utf-8')
+        return json.loads(response)
+    except Exception as e:
+        log(f"Detection request failed: {e}")
+        return {"error": str(e)}
+
+def take_snapshot(filepath, max_age=None):
+    if max_age is not None and Path(filepath).exists():
+        age = time.time() - Path(filepath).stat().st_mtime
+        if age < max_age:
+            log(f"Snapshot is fresh ({age:.2f}s old), skipping capture")
+            return True
     if not args.jpeg_sock:
         log(f"No snapshot socket configured")
         return False
@@ -520,7 +547,28 @@ def handle_upload_timelapse_instance(request_id, params):
     send_error(request_id, -1, "Upload not implemented")
 
 def handle_detect_capture(request_id, params):
-    send_error(request_id, -1, "Detect capture not implemented")
+    image_path = args.monitor_output
+    if not take_snapshot(image_path, max_age=1.0):
+        send_error(request_id, -1, "Failed to take snapshot")
+        return
+    detect_result = send_detect_request(args.detect_sock, image_path)
+    if "error" in detect_result:
+        send_error(request_id, -1, detect_result["error"])
+        return
+    detections = detect_result.get("detections", {})
+    result = {"state": "success", "err_code": 0}
+    for class_name, objects in detections.items():
+        max_prob = max((obj["confidence"] for obj in objects), default=0.0)
+        obj_areas = sum(obj["area"] for obj in objects)
+        obj_cnts = len(objects)
+        obj_probs = sum(obj["confidence"] for obj in objects)
+        result[class_name] = {
+            "max_prob": max_prob,
+            "obj_areas": obj_areas,
+            "obj_cnts": obj_cnts,
+            "obj_probs": obj_probs
+        }
+    send_response(request_id, result)
 
 METHODS = {
     "camera.start_timelapse": handle_start_timelapse,
@@ -576,6 +624,7 @@ def main():
     parser.add_argument('--mqtt-user', default=None, help='MQTT username')
     parser.add_argument('--mqtt-pass', default=None, help='MQTT password')
     parser.add_argument('--jpeg-sock', default=None, help='JPEG snapshot socket')
+    parser.add_argument('--detect-sock', default=None, help='RKNN object detection socket')
     parser.add_argument('--request-topic', default='camera/request', help='MQTT request topic')
     parser.add_argument('--response-topic', default='camera/response', help='MQTT response topic')
     parser.add_argument('--notification-topic', default='camera/notification', help='MQTT notification topic')
