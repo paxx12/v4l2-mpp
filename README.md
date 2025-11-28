@@ -8,6 +8,7 @@ V4L2 camera capture and streaming tools with Rockchip MPP hardware encoding for 
 |-----|-------------|
 | capture-v4l2-raw-mpp | V4L2 capture for raw pixel formats (YUV/RGB) with MPP hardware encoding (JPEG/H264) |
 | capture-v4l2-jpeg-mpp | V4L2 capture for JPEG/MJPEG input with MPP transcoding to H264 |
+| detect-rknn-yolo11 | YOLO11 object detection using Rockchip NPU (RKNPU2) for real-time inference |
 | stream-http | HTTP server for camera streaming (snapshots, MJPEG, H264, browser player) |
 | stream-webrtc | WebRTC server for low-latency H264 video streaming |
 | fake-service | Process supervisor with automatic restart on failure and syslog support |
@@ -25,6 +26,8 @@ Python apps (stream-http) require no compilation.
 ## Dependencies
 
 - Rockchip MPP library
+- Rockchip RKNN Lite2 runtime (for detect-rknn-yolo11)
+- Python 3 with opencv-python, numpy (for detect-rknn-yolo11)
 - ffmpeg (for timelapse video generation)
 
 ## Contributing
