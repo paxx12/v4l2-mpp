@@ -2,7 +2,7 @@ APPS = stream-http stream-snap-mqtt
 APPS_DIR = apps
 
 ifneq (x,x$(wildcard deps/mpp/usr-local/lib/librockchip_mpp.a))
-APPS += capture-usb-mpp capture-mipi-mpp
+APPS += capture-v4l2-jpeg-mpp capture-v4l2-raw-mpp
 else
 $(warning "MPP not compiled. Run ./deps/compile_mpp.sh to compile it.")
 endif

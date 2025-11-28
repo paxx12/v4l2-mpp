@@ -15,7 +15,7 @@ if id -u lava &> /dev/null; then
     RUNCMD="su lava"
 fi
 
-"$DIR/capture-usb-mpp" \
+"$DIR/capture-v4l2-jpeg-mpp" \
     --device /dev/video18 \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
     --mjpeg-sock /tmp/capture-usb-mjpeg.sock \

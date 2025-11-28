@@ -1,4 +1,4 @@
-TARGET = capture-usb-mpp
+TARGET = capture-v4l2-raw-mpp
 SRCS = main.c
 OBJS = $(SRCS:.c=.o)
 DEPS = $(SRCS:.c=.d)

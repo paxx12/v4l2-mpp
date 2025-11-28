@@ -1,4 +1,4 @@
-TARGET = capture-mipi-mpp
+TARGET = capture-v4l2-jpeg-mpp
 SRCS = main.c
 OBJS = $(SRCS:.c=.o)
 DEPS = $(SRCS:.c=.d)
