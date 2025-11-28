@@ -512,6 +512,16 @@ def handle_stop_monitor(request_id, params):
     send_response(request_id, {"state": "success"})
     send_notification("notify_camera_status_change", [{"monitor_domain": domain, "monitoring": False, "timestamp": timestamp_str()}])
 
+def handle_upload_timelapse_instance(request_id, params):
+    instance_id = params.get("instance_id")
+    if not instance_id:
+        send_error(request_id, -1, "Missing instance_id parameter")
+        return
+    send_error(request_id, -1, "Upload not implemented")
+
+def handle_detect_capture(request_id, params):
+    send_error(request_id, -1, "Detect capture not implemented")
+
 METHODS = {
     "camera.start_timelapse": handle_start_timelapse,
     "camera.stop_timelapse": handle_stop_timelapse,
@@ -520,7 +530,9 @@ METHODS = {
     "camera.take_a_photo": handle_take_photo,
     "camera.get_timelapse_instance": handle_get_timelapse_instance,
     "camera.delete_timelapse_instance": handle_delete_timelapse_instance,
+    "camera.upload_timelapse_instance": handle_upload_timelapse_instance,
     "camera.get_status": handle_get_status,
+    "camera.detect_capture": handle_detect_capture,
 }
 
 def on_connect(c, userdata, flags, rc):

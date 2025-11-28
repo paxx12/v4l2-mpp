@@ -8,6 +8,7 @@ V4L2 camera capture and streaming tools with Rockchip MPP hardware encoding for 
 |-----|-------------|
 | capture-mipi-mpp | V4L2 capture for MIPI CSI cameras with MPP hardware encoding (JPEG/H264) |
 | capture-usb-mpp | V4L2 capture for USB cameras (MJPEG input) with MPP transcoding to H264 |
+| detect-rknn-yolo11 | YOLO11 object detection using Rockchip NPU (RKNPU2) for real-time inference |
 | stream-http | HTTP server for camera streaming (snapshots, MJPEG, H264, browser player) |
 | stream-snap-mqtt | Snapmaker U1 camera interface (timelapse, monitoring, MQTT control) |
 | stream-webrtc | WebRTC server for low-latency H264 video streaming |
@@ -25,6 +26,8 @@ Python apps (stream-http, stream-snap-mqtt) require no compilation.
 ## Dependencies
 
 - Rockchip MPP library
+- Rockchip RKNN Lite2 runtime (for detect-rknn-yolo11)
+- Python 3 with opencv-python, numpy (for detect-rknn-yolo11)
 - Python 3 with paho-mqtt (for stream-snap-mqtt)
 - ffmpeg (for timelapse video generation)
 
