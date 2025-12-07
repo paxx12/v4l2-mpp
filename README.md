@@ -28,6 +28,10 @@ Python apps (stream-http, stream-snap-mqtt) require no compilation.
 - Python 3 with paho-mqtt (for stream-snap-mqtt)
 - ffmpeg (for timelapse video generation)
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for information about contributing to this project.
+
 ## License
 
-GPL-3.0-or-later
+GPL-3.0-or-later (currently). See [LICENSE](LICENSE) for details.
