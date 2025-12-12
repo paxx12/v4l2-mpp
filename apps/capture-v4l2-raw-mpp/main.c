@@ -289,31 +289,20 @@ int main(int argc, char *argv[])
     int frames_this_h264_captured = 0;
 
     while (running) {
-        fd_set fds;
-        struct timeval tv;
-
-        FD_ZERO(&fds);
-        FD_SET(v4l2.fd, &fds);
-        tv.tv_sec = 2;
-        tv.tv_usec = 0;
-
-        int r = select(v4l2.fd + 1, &fds, NULL, NULL, &tv);
+        int r = v4l2_capture_wait_for_frame(&v4l2, 2000);
         if (r < 0) {
-            if (errno == EINTR)
-                continue;
             log_perror("select");
-            break;
-        }
-        if (r == 0) {
-            log_errorf( "select timeout\n");
-            break;
+            goto error_stop;
+        } else if (r == 0) {
+            log_errorf("Timeout waiting for frame\n");
+            goto error_stop;
         }
 
         struct v4l2_buffer buf;
         struct v4l2_plane planes[V4L2_MAX_PLANES];
         int ret = v4l2_capture_read_frame(&v4l2, &buf, planes);
         if (ret < 0)
-            break;
+            goto error_stop;
         if (ret == 0)
             continue;
 
@@ -402,6 +391,10 @@ int main(int argc, char *argv[])
 
     log_printf("Captured %d frames\n", frames_captured);
     return 0;
+
+error_stop:
+    log_printf("Captured %d frames, but failed.\n", frames_captured);
+    v4l2_capture_stop(&v4l2);
 
 error:
     sock_close(&h264_sock);
