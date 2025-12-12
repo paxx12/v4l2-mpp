@@ -1,6 +1,5 @@
 #include <atomic>
 #include <cstring>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -17,6 +16,7 @@
 
 #include "h264_frames.h"
 #include "h264_stream.h"
+#include "log.h"
 
 using Buffer = std::vector<uint8_t>;
 using BufferPtr = std::shared_ptr<Buffer>;
@@ -48,7 +48,7 @@ public:
     }
 
     if (currentBuffer) {
-        printf("Dropping frame, previous frame not sent yet\n");
+        log_printf("Dropping frame, previous frame not sent yet\n");
         g_dropped_frames++;
         return;
     }
@@ -81,7 +81,7 @@ public:
     memcpy(fTo, currentBuffer->data() + currentOffset, fFrameSize);
 
     if (g_debug) {
-        printf("Sending frame at offset %u of size %u (truncated %u)\n", currentOffset, fFrameSize, fNumTruncatedBytes);
+        log_printf("Sending frame at offset %u of size %u (truncated %u)\n", currentOffset, fFrameSize, fNumTruncatedBytes);
     }
     currentOffset += fFrameSize;
 
@@ -169,7 +169,7 @@ static void h264_stream_open_or_close(BasicTaskScheduler0* scheduler, const char
         if (h264_stream_open(&g_h264_stream, h264_sock)) {
             scheduler->setBackgroundHandling(g_h264_stream.fd, SOCKET_READABLE, h264_read_handler, nullptr);
             if (g_debug) {
-                std::cerr << "H264 socket opened for streaming" << std::endl;
+                log_errorf("H264 socket opened for streaming\n");
             }
         }
     } else if (g_h264_stream.fd >= 0) {
@@ -194,7 +194,7 @@ static void close_old_clients(size_t max_clients) {
         DynamicH264Stream* stream = *it;
         g_streams.erase(it);
         stream->handleClosure();
-        std::cerr << "Closed old client, current clients: " << g_streams.size() << std::endl;
+        log_errorf("Closed old client, current clients: %zu\n", g_streams.size());
     }
 }
 
@@ -203,17 +203,17 @@ static void signal_handler(int) {
 }
 
 static void print_usage(const char* prog) {
-    std::cout << "Usage: " << prog << " [options]\n"
-              << "Options:\n"
-              << "  --h264-sock <path>     H264 stream input socket\n"
-              << "  --rtsp-port <port>     RTSP server port (default: 8554)\n"
-              << "  --max-clients <n>      Max concurrent clients (default: 4)\n"
-              << "  --debug                Enable debug output\n"
-              << "  --help                 Show this help\n";
+    printf("Usage: %s [options]\n", prog);
+    printf("Options:\n");
+    printf("  --h264-sock <path>     H264 stream input socket\n");
+    printf("  --rtsp-port <port>     RTSP server port (default: 8554)\n");
+    printf("  --max-clients <n>      Max concurrent clients (default: 4)\n");
+    printf("  --debug                Enable debug output\n");
+    printf("  --help                 Show this help\n");
 }
 
 int main(int argc, char* argv[]) {
-    printf("stream-rtsp - built %s (%s)\n", __DATE__, __FILE__);
+    log_printf("stream-rtsp - built %s (%s)\n", __DATE__, __FILE__);
 
     std::string h264_sock;
     int rtsp_port = 8554;
@@ -267,7 +267,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (h264_sock.empty()) {
-        std::cerr << "Error: --h264-sock is required\n";
+        log_errorf("Error: --h264-sock is required\n");
         print_usage(argv[0]);
         return 1;
     }
@@ -276,9 +276,9 @@ int main(int argc, char* argv[]) {
     signal(SIGTERM, signal_handler);
     signal(SIGPIPE, SIG_IGN);
 
-    std::cout << "H264 socket: " << h264_sock << std::endl;
-    std::cout << "RTSP port: " << rtsp_port << std::endl;
-    std::cout << "Max clients: " << max_clients << std::endl;
+    log_printf("H264 socket: %s\n", h264_sock.c_str());
+    log_printf("RTSP port: %d\n", rtsp_port);
+    log_printf("Max clients: %d\n", max_clients);
 
     BasicTaskScheduler0* scheduler = BasicTaskScheduler::createNew();
     UsageEnvironment* env = BasicUsageEnvironment::createNew(*scheduler);
@@ -297,13 +297,12 @@ int main(int argc, char* argv[]) {
     sms->addSubsession(H264LiveServerMediaSubsession::createNew(*env, True));
     rtspServer->addServerMediaSession(sms);
 
-    std::cout << "RTSP server started" << std::endl;
-    std::cout << "Access the stream at the following URL:\n";
-    std::cout << "  rtsp://<IP_ADDRESS>:" << rtsp_port << "/stream";
-    std::cout << std::endl;
+    log_printf("RTSP server started\n");
+    log_printf("Access the stream at the following URL:\n");
+    log_printf("  rtsp://<IP_ADDRESS>:%d/stream\n", rtsp_port);
 
     char* url = rtspServer->rtspURL(sms);
-    std::cout << "RTSP URL: " << url << std::endl;
+    log_printf("RTSP URL: %s\n", url);
     delete[] url;
 
     struct timespec stats_time;
@@ -321,7 +320,7 @@ int main(int argc, char* argv[]) {
             long elapsed_ns = (now.tv_sec - stats_time.tv_sec) * 1000000000L +
                             (now.tv_nsec - stats_time.tv_nsec);
             if (elapsed_ns >= 1000000000L) {
-                printf("Streams: %ld. Frames: %d. Dropped: %d\n",
+                log_printf("Streams: %zu. Frames: %d. Dropped: %d\n",
                     g_streams.size(),
                     g_total_frames.load(),
                     g_dropped_frames.load()
@@ -336,6 +335,6 @@ int main(int argc, char* argv[]) {
     env->reclaim();
     delete scheduler;
 
-    std::cout << "Shutting down..." << std::endl;
+    log_printf("Shutting down...\n");
     return 0;
 }

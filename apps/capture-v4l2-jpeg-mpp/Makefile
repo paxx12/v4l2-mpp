@@ -4,7 +4,7 @@ OBJS = $(SRCS:.c=.o)
 DEPS = $(SRCS:.c=.d)
 
 CC ?= gcc
-CFLAGS ?= -Wall -Wextra -O2 -MMD -I../../common/capture-common
+CFLAGS ?= -Wall -Wextra -O2 -MMD  -I../../common -I../../common/capture-common
 LDFLAGS ?=
 
 ifneq (x,x$(wildcard $(CURDIR)/../../deps/mpp/usr-local/lib/pkgconfig))

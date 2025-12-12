@@ -1,5 +1,7 @@
 #pragma once
 
+#include "log.h"
+
 static constexpr int MIN_FRAME_SIZE = 64 * 1024;
 static constexpr int MAX_FRAME_SIZE = 2 * 1024 * 1024;
 
@@ -21,23 +23,23 @@ static bool h264_stream_open(h264_stream_t *stream, const char *path) {
 
     stream->fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (stream->fd < 0) {
-        std::perror("socket");
+        log_perror("socket");
         return false;
     }
 
     struct sockaddr_un addr;
-    std::memset(&addr, 0, sizeof(addr));
+    memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
 
     if (connect(stream->fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        std::perror("connect");
+        log_perror("connect");
         close(stream->fd);
         stream->fd = -1;
         return false;
     }
 
-    std::cerr << "Connected to H264 socket" << std::endl;
+    log_errorf("Connected to H264 socket\n");
     return true;
 }
 
@@ -50,7 +52,7 @@ static bool h264_stream_close(h264_stream_t *stream) {
     stream->fd = -1;
     stream->buf.clear();
     stream->size = 0;
-    std::cerr << "Disconnected from H264 socket" << std::endl;
+    log_errorf("Disconnected from H264 socket\n");
     return true;
 }
 
@@ -60,7 +62,7 @@ static ssize_t h264_stream_process(h264_stream_t *stream, void (*store_frame)(co
     }
 
     if (stream->size >= MAX_FRAME_SIZE) {
-        std::cerr << "Buffer overflow, resetting buffer" << std::endl;
+        log_errorf("Buffer overflow, resetting buffer\n");
         stream->size = 0;
     } else if (stream->size + MIN_FRAME_SIZE / 2 > stream->buf.size()) {
         stream->buf.resize(stream->size + MIN_FRAME_SIZE);
@@ -71,14 +73,14 @@ static ssize_t h264_stream_process(h264_stream_t *stream, void (*store_frame)(co
         if (n == EAGAIN || n == EWOULDBLOCK) {
             return -1;
         }
-        std::cerr << "Error reading from H264 socket: " << strerror(errno) << std::endl;
+        log_errorf("Error reading from H264 socket: %s\n", strerror(errno));
         close(stream->fd);
         stream->fd = -1;
         return -1;
     }
 
     if (n == 0) {
-        std::cerr << "H264 socket closed by peer" << std::endl;
+        log_errorf("H264 socket closed by peer\n");
         close(stream->fd);
         stream->fd = -1;
         return -1;
@@ -94,7 +96,7 @@ static ssize_t h264_stream_process(h264_stream_t *stream, void (*store_frame)(co
     size_t size = processed - stream->buf.data();
     size_t remaining = stream->size - size;
     if (remaining > 0) {
-        std::memmove(stream->buf.data(), processed, remaining);
+        memmove(stream->buf.data(), processed, remaining);
     }
     stream->size = remaining;
 

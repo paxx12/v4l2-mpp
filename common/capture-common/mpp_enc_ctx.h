@@ -8,6 +8,7 @@
 #include <rockchip/mpp_buffer.h>
 #include <rockchip/mpp_frame.h>
 #include <rockchip/mpp_packet.h>
+#include "log.h"
 
 typedef struct {
     MppCtx ctx;
@@ -29,19 +30,19 @@ __attribute__((unused)) static int mpp_jpeg_encoder_init(mpp_enc_ctx_t *ctx, uns
 
     ret = mpp_create(&ctx->ctx, &ctx->mpi);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_create failed: %d\n", ret);
+        log_errorf("mpp_create failed: %d\n", ret);
         return -1;
     }
 
     ret = mpp_init(ctx->ctx, MPP_CTX_ENC, MPP_VIDEO_CodingMJPEG);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_init failed: %d\n", ret);
+        log_errorf("mpp_init failed: %d\n", ret);
         return -1;
     }
 
     ret = mpp_enc_cfg_init(&ctx->cfg);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_enc_cfg_init failed: %d\n", ret);
+        log_errorf("mpp_enc_cfg_init failed: %d\n", ret);
         return -1;
     }
 
@@ -55,13 +56,13 @@ __attribute__((unused)) static int mpp_jpeg_encoder_init(mpp_enc_ctx_t *ctx, uns
 
     ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_CFG, ctx->cfg);
     if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_ENC_SET_CFG failed: %d\n", ret);
+        log_errorf("MPP_ENC_SET_CFG failed: %d\n", ret);
         return -1;
     }
 
     ret = mpp_buffer_group_get_internal(&ctx->buf_grp, MPP_BUFFER_TYPE_DRM);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal failed: %d\n", ret);
+        log_errorf("mpp_buffer_group_get_internal failed: %d\n", ret);
         return -1;
     }
 
@@ -78,19 +79,19 @@ __attribute__((unused)) static int mpp_h264_encoder_init(mpp_enc_ctx_t *ctx, uns
 
     ret = mpp_create(&ctx->ctx, &ctx->mpi);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_create failed: %d\n", ret);
+        log_errorf("mpp_create failed: %d\n", ret);
         return -1;
     }
 
     ret = mpp_init(ctx->ctx, MPP_CTX_ENC, MPP_VIDEO_CodingAVC);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_init failed: %d\n", ret);
+        log_errorf("mpp_init failed: %d\n", ret);
         return -1;
     }
 
     ret = mpp_enc_cfg_init(&ctx->cfg);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_enc_cfg_init failed: %d\n", ret);
+        log_errorf("mpp_enc_cfg_init failed: %d\n", ret);
         return -1;
     }
 
@@ -118,19 +119,19 @@ __attribute__((unused)) static int mpp_h264_encoder_init(mpp_enc_ctx_t *ctx, uns
 
     ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_CFG, ctx->cfg);
     if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_ENC_SET_CFG failed: %d\n", ret);
+        log_errorf("MPP_ENC_SET_CFG failed: %d\n", ret);
         return -1;
     }
 
     MppEncHeaderMode header_mode = MPP_ENC_HEADER_MODE_EACH_IDR;
     ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_HEADER_MODE, &header_mode);
     if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_ENC_SET_HEADER_MODE failed: %d\n", ret);
+        log_errorf("MPP_ENC_SET_HEADER_MODE failed: %d\n", ret);
     }
 
     ret = mpp_buffer_group_get_internal(&ctx->buf_grp, MPP_BUFFER_TYPE_DRM);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal failed: %d\n", ret);
+        log_errorf("mpp_buffer_group_get_internal failed: %d\n", ret);
         return -1;
     }
 
@@ -152,13 +153,13 @@ __attribute__((unused)) static MppPacket mpp_encode_mppframe(mpp_enc_ctx_t *ctx,
 
     ret = ctx->mpi->encode_put_frame(ctx->ctx, frame);
     if (ret != MPP_OK) {
-        fprintf(stderr, "encode_put_frame failed: %d\n", ret);
+        log_errorf("encode_put_frame failed: %d\n", ret);
         return NULL;
     }
 
     ret = ctx->mpi->encode_get_packet(ctx->ctx, &packet);
     if (ret != MPP_OK || !packet) {
-        fprintf(stderr, "encode_get_packet failed: %d\n", ret);
+        log_errorf("encode_get_packet failed: %d\n", ret);
         return NULL;
     }
 
@@ -178,7 +179,7 @@ __attribute__((unused)) static MppPacket mpp_encode_frame(mpp_enc_ctx_t *ctx, vo
 
     ret = mpp_buffer_get(ctx->buf_grp, &frame_buf, frame_size);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_get frame failed: %d\n", ret);
+        log_errorf("mpp_buffer_get frame failed: %d\n", ret);
         return NULL;
     }
 
@@ -187,7 +188,7 @@ __attribute__((unused)) static MppPacket mpp_encode_frame(mpp_enc_ctx_t *ctx, vo
 
     ret = mpp_frame_init(&frame);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_frame_init failed: %d\n", ret);
+        log_errorf("mpp_frame_init failed: %d\n", ret);
         mpp_buffer_put(frame_buf);
         return NULL;
     }

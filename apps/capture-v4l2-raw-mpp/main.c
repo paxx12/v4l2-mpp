@@ -23,6 +23,7 @@
 #include "sock_ctx.h"
 #include "callback_chain.h"
 #include "mpp_enc_ctx.h"
+#include "log.h"
 
 const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
 
@@ -80,10 +81,10 @@ static void write_output_rename_cb(const void *data, size_t size, void *arg)
         fwrite(data, 1, size, fp);
         fclose(fp);
         if (rename(tmp_path, output) < 0) {
-            perror("rename");
+            log_perror("rename");
         }
     } else {
-        perror("fopen");
+        log_perror("fopen");
     }
 }
 
@@ -110,7 +111,7 @@ static void print_usage(const char *prog)
 
 int main(int argc, char *argv[])
 {
-    printf("capture-v4l2-raw-mpp - built %s (%s)\n", __DATE__, __FILE__);
+    log_printf("capture-v4l2-raw-mpp - built %s (%s)\n", __DATE__, __FILE__);
 
     const char *device = "/dev/video0";
     const char *format = "yuyv";
@@ -225,54 +226,54 @@ int main(int argc, char *argv[])
     sock_ctx_t mjpeg_sock = {0};
     sock_ctx_t h264_sock = {0};
 
-    printf("Device: %s\n", device);
-    printf("Resolution: %dx%d\n", width, height);
-    printf("Format: %s\n", format);
-    printf("JPEG output: %s\n", jpeg_output);
-    if (jpeg_snapshot) printf("JPEG snapshot socket: %s\n", jpeg_snapshot);
-    if (mjpeg_stream) printf("MJPEG stream socket: %s\n", mjpeg_stream);
-    if (h264_stream) printf("H264 stream socket: %s\n", h264_stream);
-    printf("FPS: %d\n", fps);
+    log_printf("Device: %s\n", device);
+    log_printf("Resolution: %dx%d\n", width, height);
+    log_printf("Format: %s\n", format);
+    log_printf("JPEG output: %s\n", jpeg_output);
+    if (jpeg_snapshot) log_printf("JPEG snapshot socket: %s\n", jpeg_snapshot);
+    if (mjpeg_stream) log_printf("MJPEG stream socket: %s\n", mjpeg_stream);
+    if (h264_stream) log_printf("H264 stream socket: %s\n", h264_stream);
+    log_printf("FPS: %d\n", fps);
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
     if (v4l2_capture_open(&v4l2, device, width, height, pixfmt, fps, num_planes) < 0) {
-        fprintf(stderr, "Failed to open V4L2 device\n");
+        log_errorf( "Failed to open V4L2 device\n");
         return 1;
     }
 
     MppFrameFormat mpp_fmt = v4l2_to_mpp_format(v4l2.pixfmt);
 
     if (mpp_jpeg_encoder_init(&mpp_jpeg, v4l2.width, v4l2.height, mpp_fmt, quality) < 0) {
-        fprintf(stderr, "Failed to initialize JPEG encoder\n");
+        log_errorf( "Failed to initialize JPEG encoder\n");
         goto error;
     }
 
     if (jpeg_snapshot && sock_open(&jpeg_sock, jpeg_snapshot) < 0) {
-        fprintf(stderr, "Failed to open JPEG snapshot socket\n");
+        log_errorf( "Failed to open JPEG snapshot socket\n");
         goto error;
     }
     jpeg_sock.one_frame = true;
 
     if (mjpeg_stream && sock_open(&mjpeg_sock, mjpeg_stream) < 0) {
-        fprintf(stderr, "Failed to open MJPEG socket\n");
+        log_errorf( "Failed to open MJPEG socket\n");
         goto error;
     }
 
     if (h264_stream) {
         if (mpp_h264_encoder_init(&mpp_h264, v4l2.width, v4l2.height, mpp_fmt, bitrate, fps) < 0) {
-            fprintf(stderr, "Failed to initialize H264 encoder\n");
+            log_errorf( "Failed to initialize H264 encoder\n");
             goto error;
         }
         if (sock_open(&h264_sock, h264_stream) < 0) {
-            fprintf(stderr, "Failed to open H264 socket\n");
+            log_errorf( "Failed to open H264 socket\n");
             goto error;
         }
     }
 
     if (v4l2_capture_start(&v4l2) < 0) {
-        fprintf(stderr, "Failed to start V4L2 streaming\n");
+        log_errorf( "Failed to start V4L2 streaming\n");
         goto error;
     }
 
@@ -300,11 +301,11 @@ int main(int argc, char *argv[])
         if (r < 0) {
             if (errno == EINTR)
                 continue;
-            perror("select");
+            log_perror("select");
             break;
         }
         if (r == 0) {
-            fprintf(stderr, "select timeout\n");
+            log_errorf( "select timeout\n");
             break;
         }
 
@@ -365,7 +366,7 @@ int main(int argc, char *argv[])
         long elapsed_ns = (now.tv_sec - stats_time.tv_sec) * 1000000000L +
                           (now.tv_nsec - stats_time.tv_nsec);
         if (elapsed_ns >= 1000000000L) {
-                printf("FPS: %d (JPEG: %d, H264: %d) (total: %d). JPEG: %d, MJPEG: %d, H264: %d\n",
+                log_printf("FPS: %d (JPEG: %d, H264: %d) (total: %d). JPEG: %d, MJPEG: %d, H264: %d\n",
                 frames_this_second, frames_this_jpeg_captured, frames_this_h264_captured,
                 frames_captured,
                 jpeg_sock.num_clients,
@@ -399,7 +400,7 @@ int main(int argc, char *argv[])
     mpp_encoder_close(&mpp_jpeg);
     v4l2_capture_close(&v4l2);
 
-    printf("Captured %d frames\n", frames_captured);
+    log_printf("Captured %d frames\n", frames_captured);
     return 0;
 
 error:

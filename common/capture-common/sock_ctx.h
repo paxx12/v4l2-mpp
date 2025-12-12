@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <time.h>
+#include "log.h"
 
 #define SOCK_MAX_CLIENTS 8
 #define SOCK_WRITE_TIMEOUT_MS 100
@@ -31,7 +32,7 @@ static int sock_open(sock_ctx_t *ctx, const char *path)
 
     ctx->listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (ctx->listen_fd < 0) {
-        perror("socket");
+        log_perror("socket");
         return -1;
     }
 
@@ -41,7 +42,7 @@ static int sock_open(sock_ctx_t *ctx, const char *path)
     strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
 
     if (bind(ctx->listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("bind");
+        log_perror("bind");
         close(ctx->listen_fd);
         ctx->listen_fd = -1;
         return -1;
@@ -50,7 +51,7 @@ static int sock_open(sock_ctx_t *ctx, const char *path)
     chmod(path, 0777);
 
     if (listen(ctx->listen_fd, SOCK_MAX_CLIENTS) < 0) {
-        perror("listen");
+        log_perror("listen");
         close(ctx->listen_fd);
         ctx->listen_fd = -1;
         return -1;
@@ -94,7 +95,7 @@ static bool sock_accept_clients(sock_ctx_t *ctx)
         if (client_fd < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 break;
-            perror("accept");
+            log_perror("accept");
             break;
         }
 
@@ -114,10 +115,10 @@ static bool sock_accept_clients(sock_ctx_t *ctx)
             ctx->num_clients++;
             ctx->need_keyframe = true;
             accepted = true;
-            printf("Socket %s: client connected (slot %d, total %d)\n", ctx->path, slot, ctx->num_clients);
+            log_printf("Socket %s: client connected (slot %d, total %d)\n", ctx->path, slot, ctx->num_clients);
         } else {
             close(client_fd);
-            printf("Socket %s: rejected client, max reached\n", ctx->path);
+            log_printf("Socket %s: rejected client, max reached\n", ctx->path);
         }
     }
 
@@ -193,10 +194,10 @@ static void sock_write_cb(const void *data, size_t size, void *arg)
 
         if (sock_write_client_fd(ctx->client_fds[i], data, size) < 0) {
             if (errno == ETIMEDOUT) {
-                printf("Socket %s: client %d timeout (%dms), closing\n",
+                log_printf("Socket %s: client %d timeout (%dms), closing\n",
                        ctx->path, i, SOCK_WRITE_TIMEOUT_MS);
             } else {
-                printf("Socket %s: error writing to client %d, closing\n", ctx->path, i);
+                log_printf("Socket %s: error writing to client %d, closing\n", ctx->path, i);
             }
             close(ctx->client_fds[i]);
             ctx->client_fds[i] = -1;
@@ -205,7 +206,7 @@ static void sock_write_cb(const void *data, size_t size, void *arg)
         }
 
         if (ctx->one_frame) {
-            printf("Socket %s: closing client %d after one frame\n", ctx->path, i);
+            log_printf("Socket %s: closing client %d after one frame\n", ctx->path, i);
             close(ctx->client_fds[i]);
             ctx->client_fds[i] = -1;
             ctx->num_clients--;

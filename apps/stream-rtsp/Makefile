@@ -4,7 +4,7 @@ OBJS = $(SRCS:.cpp=.o)
 DEPS = $(SRCS:.cpp=.d)
 
 CXX ?= g++
-CXXFLAGS ?= -Wall -Wextra -O2 -MMD -std=c++17 -I../../common/stream-common
+CXXFLAGS ?= -Wall -Wextra -O2 -MMD -std=c++17 -I../../common -I../../common/stream-common
 LDFLAGS ?= -static-libstdc++
 
 LIVE555_PATH ?= ../../deps/live/usr-local/

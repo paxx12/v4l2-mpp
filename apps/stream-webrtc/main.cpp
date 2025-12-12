@@ -1,4 +1,3 @@
-#include <iostream>
 #include <string>
 #include <thread>
 #include <mutex>
@@ -22,6 +21,7 @@
 
 #include "h264_frames.h"
 #include "h264_stream.h"
+#include "log.h"
 
 using json = nlohmann::json;
 
@@ -107,7 +107,7 @@ static void cleanup_clients() {
     g_clients.remove_if([](const std::shared_ptr<Client>& c) {
         if (!c->pc || c->pc->state() == rtc::PeerConnection::State::Closed ||
             c->pc->state() == rtc::PeerConnection::State::Failed) {
-            std::cerr << "Removed client " << c->id << std::endl;
+            log_errorf("Removed client %s\n", c->id.c_str());
             return true;
         }
         return false;
@@ -122,14 +122,14 @@ static void ping_clients() {
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - c->start_time).count();
 
         if (c->timeout_s > 0 && elapsed >= c->timeout_s) {
-            std::cerr << "Client " << c->id << " session timeout" << std::endl;
+            log_errorf("Client %s session timeout\n", c->id.c_str());
             c->pc->close();
             continue;
         }
 
         if (!c->data_channel || !c->data_channel->isOpen()) {
             if (elapsed * 1000 >= CONNECT_TIMEOUT_MS) {
-                std::cerr << "Client " << c->id << " connection timeout" << std::endl;
+                log_errorf("Client %s connection timeout\n", c->id.c_str());
                 c->pc->close();
             }
             continue;
@@ -138,12 +138,12 @@ static void ping_clients() {
         auto since_pong = std::chrono::duration_cast<std::chrono::milliseconds>(now - c->last_pong).count();
         if (since_pong >= PONG_TIMEOUT_MS) {
             if (c->keepAlive) {
-                std::cerr << "Client " << c->id << " pong timeout" << std::endl;
+                log_errorf("Client %s pong timeout\n", c->id.c_str());
                 c->pc->close();
                 continue;
             }
 
-            std::cerr << "Client " << c->id << " pong timeout, but keepAlive is false" << std::endl;
+            log_errorf("Client %s pong timeout, but keepAlive is false\n", c->id.c_str());
             c->last_pong = now;
         }
 
@@ -178,7 +178,7 @@ static std::shared_ptr<Client> create_client(const json& request) {
     std::weak_ptr<Client> weak_client = client;
     client->pc->onStateChange([weak_client](rtc::PeerConnection::State state) {
         if (auto c = weak_client.lock()) {
-            std::cerr << "Client " << c->id << " state: " << static_cast<int>(state) << std::endl;
+            log_errorf("Client %s state: %d\n", c->id.c_str(), static_cast<int>(state));
         }
         if (state == rtc::PeerConnection::State::Connected) {
 
@@ -223,8 +223,7 @@ static std::shared_ptr<Client> create_client(const json& request) {
     client->keepAlive = request.value("keepAlive", false);
 
     if (!client->keepAlive && client->timeout_s > MAX_SESSION_WITHOUT_TIMEOUT_S) {
-        std::cerr << "Capping client timeout to " << MAX_SESSION_WITHOUT_TIMEOUT_S
-            << " seconds since keepAlive is false" << std::endl;
+        log_errorf("Capping client timeout to %d seconds since keepAlive is false\n", MAX_SESSION_WITHOUT_TIMEOUT_S);
         client->timeout_s = MAX_SESSION_WITHOUT_TIMEOUT_S;
     }
 
@@ -381,18 +380,18 @@ static void signal_handler(int) {
 }
 
 static void print_usage(const char* prog) {
-    std::cout << "Usage: " << prog << " [options]\n"
-              << "Options:\n"
-              << "  --webrtc-sock <path>   Unix socket for WebRTC signaling\n"
-              << "  --h264-sock <path>     H264 stream input socket\n"
-              << "  --max-clients <n>      Max concurrent clients (default: 4)\n"
-              << "  --stun <url>           STUN server URL (can be repeated)\n"
-              << "  --debug                Enable debug output\n"
-              << "  --help                 Show this help\n";
+    printf("Usage: %s [options]\n", prog);
+    printf("Options:\n");
+    printf("  --webrtc-sock <path>   Unix socket for WebRTC signaling\n");
+    printf("  --h264-sock <path>     H264 stream input socket\n");
+    printf("  --max-clients <n>      Max concurrent clients (default: 4)\n");
+    printf("  --stun <url>           STUN server URL (can be repeated)\n");
+    printf("  --debug                Enable debug output\n");
+    printf("  --help                 Show this help\n");
 }
 
 int main(int argc, char* argv[]) {
-    printf("stream-webrtc - built %s (%s)\n", __DATE__, __FILE__);
+    log_printf("stream-webrtc - built %s (%s)\n", __DATE__, __FILE__);
 
     std::string webrtc_sock;
 
@@ -443,7 +442,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (webrtc_sock.empty() || g_h264_sock.empty()) {
-        std::cerr << "Error: --webrtc-sock and --h264-sock are required\n";
+        log_errorf("Error: --webrtc-sock and --h264-sock are required\n");
         print_usage(argv[0]);
         return 1;
     }
@@ -456,36 +455,36 @@ int main(int argc, char* argv[]) {
     signal(SIGTERM, signal_handler);
     signal(SIGPIPE, SIG_IGN);
 
-    std::cout << "WebRTC socket: " << webrtc_sock << std::endl;
-    std::cout << "H264 socket: " << g_h264_sock << std::endl;
-    std::cout << "Max clients: " << g_max_clients << std::endl;
+    log_printf("WebRTC socket: %s\n", webrtc_sock.c_str());
+    log_printf("H264 socket: %s\n", g_h264_sock.c_str());
+    log_printf("Max clients: %d\n", g_max_clients);
 
     unlink(webrtc_sock.c_str());
 
     int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (listen_fd < 0) {
-        std::perror("socket");
+        log_perror("socket");
         return 1;
     }
 
     struct sockaddr_un addr;
-    std::memset(&addr, 0, sizeof(addr));
+    memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, webrtc_sock.c_str(), sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, webrtc_sock.c_str(), sizeof(addr.sun_path) - 1);
 
     if (bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        std::perror("bind");
+        log_perror("bind");
         return 1;
     }
 
     chmod(webrtc_sock.c_str(), 0777);
 
     if (listen(listen_fd, 16) < 0) {
-        std::perror("listen");
+        log_perror("listen");
         return 1;
     }
 
-    std::cout << "WebRTC server running..." << std::endl;
+    log_printf("WebRTC server running...\n");
 
     while (g_running) {
         struct pollfd pfd[] = {
@@ -514,7 +513,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "Shutting down..." << std::endl;
+    log_printf("Shutting down...\n");
 
     h264_stream_close(&g_h264_stream);
     close(listen_fd);
