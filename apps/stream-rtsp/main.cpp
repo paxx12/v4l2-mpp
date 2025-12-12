@@ -213,6 +213,8 @@ static void print_usage(const char* prog) {
 }
 
 int main(int argc, char* argv[]) {
+    printf("stream-rtsp - built %s (%s)\n", __DATE__, __FILE__);
+
     std::string h264_sock;
     int rtsp_port = 8554;
     int max_clients = 0;

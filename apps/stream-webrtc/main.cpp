@@ -392,6 +392,8 @@ static void print_usage(const char* prog) {
 }
 
 int main(int argc, char* argv[]) {
+    printf("stream-webrtc - built %s (%s)\n", __DATE__, __FILE__);
+
     std::string webrtc_sock;
 
     enum {

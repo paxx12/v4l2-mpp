@@ -103,6 +103,8 @@ static void print_usage(const char *prog)
 
 int main(int argc, char *argv[])
 {
+    printf("capture-v4l2-raw-mpp - built %s (%s)\n", __DATE__, __FILE__);
+
     const char *device = "/dev/video0";
     const char *format = "yuyv";
     const char *jpeg_output = NULL;

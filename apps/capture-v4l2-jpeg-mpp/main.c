@@ -67,6 +67,8 @@ static void print_usage(const char *prog)
 
 int main(int argc, char *argv[])
 {
+    printf("capture-v4l2-jpeg-mpp - built %s (%s)\n", __DATE__, __FILE__);
+
     const char *device = "/dev/video0";
     const char *jpeg_output = NULL;
     const char *jpeg_snapshot = NULL;
