@@ -27,6 +27,13 @@
 const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
 
 int debug = 0;
+static volatile sig_atomic_t running = 1;
+
+static void signal_handler(int sig)
+{
+    (void)sig;
+    running = 0;
+}
 
 static MppFrameFormat v4l2_to_mpp_format(unsigned int pixfmt)
 {
@@ -227,6 +234,9 @@ int main(int argc, char *argv[])
     if (h264_stream) printf("H264 stream socket: %s\n", h264_stream);
     printf("FPS: %d\n", fps);
 
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
     if (v4l2_capture_open(&v4l2, device, width, height, pixfmt, fps, num_planes) < 0) {
         fprintf(stderr, "Failed to open V4L2 device\n");
         return 1;
@@ -277,7 +287,7 @@ int main(int argc, char *argv[])
     int frames_this_jpeg_captured = 0;
     int frames_this_h264_captured = 0;
 
-    while (1) {
+    while (running) {
         fd_set fds;
         struct timeval tv;
 
