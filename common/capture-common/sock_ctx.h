@@ -3,8 +3,10 @@
 
 #include <stdbool.h>
 #include <sys/types.h>
+#include <time.h>
 
 #define SOCK_MAX_CLIENTS 8
+#define SOCK_WRITE_TIMEOUT_MS 100
 
 typedef struct {
     const char *path;
@@ -152,11 +154,23 @@ static ssize_t sock_write_client_fd(int fd, const void *data, size_t size)
 {
     const char *ptr = data;
     size_t remaining = size;
+    struct timespec start, now;
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
 
     while (remaining > 0) {
         ssize_t written = send(fd, ptr, remaining, MSG_NOSIGNAL);
         if (written < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                long elapsed_ms = (now.tv_sec - start.tv_sec) * 1000 +
+                                  (now.tv_nsec - start.tv_nsec) / 1000000;
+
+                if (elapsed_ms >= SOCK_WRITE_TIMEOUT_MS) {
+                    errno = ETIMEDOUT;
+                    return -1;
+                }
+
                 usleep(1000);
                 continue;
             }
@@ -178,7 +192,12 @@ static void sock_write_cb(const void *data, size_t size, void *arg)
             continue;
 
         if (sock_write_client_fd(ctx->client_fds[i], data, size) < 0) {
-            printf("Socket %s: error writing to client %d, closing\n", ctx->path, i);
+            if (errno == ETIMEDOUT) {
+                printf("Socket %s: client %d timeout (%dms), closing\n",
+                       ctx->path, i, SOCK_WRITE_TIMEOUT_MS);
+            } else {
+                printf("Socket %s: error writing to client %d, closing\n", ctx->path, i);
+            }
             close(ctx->client_fds[i]);
             ctx->client_fds[i] = -1;
             ctx->num_clients--;
