@@ -23,10 +23,18 @@
 #include "sock_ctx.h"
 #include "callback_chain.h"
 #include "mpp_enc_ctx.h"
+#include "log.h"
 
 const char NAL_AUD_FRAME[] = {0x00, 0x00, 0x00, 0x01, 0x09, 0xf0};
 
 int debug = 0;
+static volatile sig_atomic_t running = 1;
+
+static void signal_handler(int sig)
+{
+    (void)sig;
+    running = 0;
+}
 
 static MppFrameFormat v4l2_to_mpp_format(unsigned int pixfmt)
 {
@@ -73,10 +81,10 @@ static void write_output_rename_cb(const void *data, size_t size, void *arg)
         fwrite(data, 1, size, fp);
         fclose(fp);
         if (rename(tmp_path, output) < 0) {
-            perror("rename");
+            log_perror("rename");
         }
     } else {
-        perror("fopen");
+        log_perror("fopen");
     }
 }
 
@@ -95,7 +103,6 @@ static void print_usage(const char *prog)
     printf("  --h264-sock <path>      H264 stream output socket path (optional)\n");
     printf("  --h264-bitrate <kbps>   H264 bitrate in kbps (default: 2000)\n");
     printf("  --fps <fps>             Frames per second (default: 30)\n");
-    printf("  --count <count>         Number of frames to capture, 0 for unlimited (default: 0)\n");
     printf("  --num-planes <n>        Number of capture planes (default: 1)\n");
     printf("  --idle <ms>             Idle sleep in ms when no readers (default: 1000)\n");
     printf("  --debug                 Enable debug output\n");
@@ -104,6 +111,8 @@ static void print_usage(const char *prog)
 
 int main(int argc, char *argv[])
 {
+    log_printf("capture-v4l2-raw-mpp - built %s (%s)\n", __DATE__, __FILE__);
+
     const char *device = "/dev/video0";
     const char *format = "yuyv";
     const char *jpeg_output = NULL;
@@ -115,7 +124,6 @@ int main(int argc, char *argv[])
     int quality = 80;
     int bitrate = 2000;
     int fps = 30;
-    int count = 0;
     int num_planes = 1;
     int idle_ms = 1000;
     int opt;
@@ -132,7 +140,6 @@ int main(int argc, char *argv[])
         OPT_H264,
         OPT_BITRATE,
         OPT_FPS,
-        OPT_COUNT,
         OPT_NUM_PLANES,
         OPT_IDLE,
         OPT_DEBUG,
@@ -151,7 +158,6 @@ int main(int argc, char *argv[])
         {"h264-sock",     required_argument, 0, OPT_H264},
         {"h264-bitrate",  required_argument, 0, OPT_BITRATE},
         {"fps",           required_argument, 0, OPT_FPS},
-        {"count",         required_argument, 0, OPT_COUNT},
         {"num-planes",    required_argument, 0, OPT_NUM_PLANES},
         {"idle",          required_argument, 0, OPT_IDLE},
         {"debug",         no_argument,       0, OPT_DEBUG},
@@ -194,9 +200,6 @@ int main(int argc, char *argv[])
         case OPT_FPS:
             fps = atoi(optarg);
             break;
-        case OPT_COUNT:
-            count = atoi(optarg);
-            break;
         case OPT_NUM_PLANES:
             num_planes = atoi(optarg);
             break;
@@ -223,58 +226,59 @@ int main(int argc, char *argv[])
     sock_ctx_t mjpeg_sock = {0};
     sock_ctx_t h264_sock = {0};
 
-    printf("Device: %s\n", device);
-    printf("Resolution: %dx%d\n", width, height);
-    printf("Format: %s\n", format);
-    printf("JPEG output: %s\n", jpeg_output);
-    if (jpeg_snapshot) printf("JPEG snapshot socket: %s\n", jpeg_snapshot);
-    if (mjpeg_stream) printf("MJPEG stream socket: %s\n", mjpeg_stream);
-    if (h264_stream) printf("H264 stream socket: %s\n", h264_stream);
-    printf("FPS: %d\n", fps);
-    printf("Frames: %d\n", count);
+    log_printf("Device: %s\n", device);
+    log_printf("Resolution: %dx%d\n", width, height);
+    log_printf("Format: %s\n", format);
+    log_printf("JPEG output: %s\n", jpeg_output);
+    if (jpeg_snapshot) log_printf("JPEG snapshot socket: %s\n", jpeg_snapshot);
+    if (mjpeg_stream) log_printf("MJPEG stream socket: %s\n", mjpeg_stream);
+    if (h264_stream) log_printf("H264 stream socket: %s\n", h264_stream);
+    log_printf("FPS: %d\n", fps);
+
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     if (v4l2_capture_open(&v4l2, device, width, height, pixfmt, fps, num_planes) < 0) {
-        fprintf(stderr, "Failed to open V4L2 device\n");
+        log_errorf( "Failed to open V4L2 device\n");
         return 1;
     }
 
     MppFrameFormat mpp_fmt = v4l2_to_mpp_format(v4l2.pixfmt);
 
     if (mpp_jpeg_encoder_init(&mpp_jpeg, v4l2.width, v4l2.height, mpp_fmt, quality) < 0) {
-        fprintf(stderr, "Failed to initialize JPEG encoder\n");
+        log_errorf( "Failed to initialize JPEG encoder\n");
         goto error;
     }
 
     if (jpeg_snapshot && sock_open(&jpeg_sock, jpeg_snapshot) < 0) {
-        fprintf(stderr, "Failed to open JPEG snapshot socket\n");
+        log_errorf( "Failed to open JPEG snapshot socket\n");
         goto error;
     }
     jpeg_sock.one_frame = true;
 
     if (mjpeg_stream && sock_open(&mjpeg_sock, mjpeg_stream) < 0) {
-        fprintf(stderr, "Failed to open MJPEG socket\n");
+        log_errorf( "Failed to open MJPEG socket\n");
         goto error;
     }
 
     if (h264_stream) {
         if (mpp_h264_encoder_init(&mpp_h264, v4l2.width, v4l2.height, mpp_fmt, bitrate, fps) < 0) {
-            fprintf(stderr, "Failed to initialize H264 encoder\n");
+            log_errorf( "Failed to initialize H264 encoder\n");
             goto error;
         }
         if (sock_open(&h264_sock, h264_stream) < 0) {
-            fprintf(stderr, "Failed to open H264 socket\n");
+            log_errorf( "Failed to open H264 socket\n");
             goto error;
         }
     }
 
     if (v4l2_capture_start(&v4l2) < 0) {
-        fprintf(stderr, "Failed to start V4L2 streaming\n");
+        log_errorf( "Failed to start V4L2 streaming\n");
         goto error;
     }
 
     int frame_delay_us = 1000000 / fps;
     int frames_captured = 0;
-    int continuous = (count == 0);
 
     struct timespec stats_time;
     struct timespec last_frame;
@@ -284,32 +288,21 @@ int main(int argc, char *argv[])
     int frames_this_jpeg_captured = 0;
     int frames_this_h264_captured = 0;
 
-    while (continuous || frames_captured < count) {
-        fd_set fds;
-        struct timeval tv;
-
-        FD_ZERO(&fds);
-        FD_SET(v4l2.fd, &fds);
-        tv.tv_sec = 2;
-        tv.tv_usec = 0;
-
-        int r = select(v4l2.fd + 1, &fds, NULL, NULL, &tv);
+    while (running) {
+        int r = v4l2_capture_wait_for_frame(&v4l2, 2000);
         if (r < 0) {
-            if (errno == EINTR)
-                continue;
-            perror("select");
-            break;
-        }
-        if (r == 0) {
-            fprintf(stderr, "select timeout\n");
-            break;
+            log_perror("select");
+            goto error_stop;
+        } else if (r == 0) {
+            log_errorf("Timeout waiting for frame\n");
+            goto error_stop;
         }
 
         struct v4l2_buffer buf;
         struct v4l2_plane planes[V4L2_MAX_PLANES];
         int ret = v4l2_capture_read_frame(&v4l2, &buf, planes);
         if (ret < 0)
-            break;
+            goto error_stop;
         if (ret == 0)
             continue;
 
@@ -362,7 +355,7 @@ int main(int argc, char *argv[])
         long elapsed_ns = (now.tv_sec - stats_time.tv_sec) * 1000000000L +
                           (now.tv_nsec - stats_time.tv_nsec);
         if (elapsed_ns >= 1000000000L) {
-                printf("FPS: %d (JPEG: %d, H264: %d) (total: %d). JPEG: %d, MJPEG: %d, H264: %d\n",
+                log_printf("FPS: %d (JPEG: %d, H264: %d) (total: %d). JPEG: %d, MJPEG: %d, H264: %d\n",
                 frames_this_second, frames_this_jpeg_captured, frames_this_h264_captured,
                 frames_captured,
                 jpeg_sock.num_clients,
@@ -396,8 +389,12 @@ int main(int argc, char *argv[])
     mpp_encoder_close(&mpp_jpeg);
     v4l2_capture_close(&v4l2);
 
-    printf("Captured %d frames\n", frames_captured);
+    log_printf("Captured %d frames\n", frames_captured);
     return 0;
+
+error_stop:
+    log_printf("Captured %d frames, but failed.\n", frames_captured);
+    v4l2_capture_stop(&v4l2);
 
 error:
     sock_close(&h264_sock);

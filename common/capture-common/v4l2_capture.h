@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/videodev2.h>
+#include "log.h"
 
 #define V4L2_BUFFERS 4
 #define V4L2_MAX_PLANES 4
@@ -50,29 +51,29 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
 
     ctx->fd = open(device, O_RDWR | O_NONBLOCK);
     if (ctx->fd < 0) {
-        perror("open video device");
+        log_perror("open video device");
         return -1;
     }
 
     if (v4l2_ioctl(ctx->fd, VIDIOC_QUERYCAP, &cap) < 0) {
-        perror("VIDIOC_QUERYCAP");
+        log_perror("VIDIOC_QUERYCAP");
         return -1;
     }
 
     if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE) {
         use_mplane = 1;
         ctx->buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-        printf("Using multi-planar capture\n");
+        log_printf("Using multi-planar capture\n");
     } else if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) {
         ctx->buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        printf("Using single-planar capture\n");
+        log_printf("Using single-planar capture\n");
     } else {
-        fprintf(stderr, "Device does not support video capture\n");
+        log_errorf("Device does not support video capture\n");
         return -1;
     }
 
     if (!(cap.capabilities & V4L2_CAP_STREAMING)) {
-        fprintf(stderr, "Device does not support streaming\n");
+        log_errorf("Device does not support streaming\n");
         return -1;
     }
 
@@ -92,7 +93,7 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
     }
 
     if (v4l2_ioctl(ctx->fd, VIDIOC_S_FMT, &fmt) < 0) {
-        perror("VIDIOC_S_FMT");
+        log_perror("VIDIOC_S_FMT");
         return -1;
     }
 
@@ -108,7 +109,7 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
         ctx->num_planes = (requested_planes > 0) ? requested_planes : 1;
     }
 
-    printf("V4L2: %ux%u format=0x%08x planes=%u\n", ctx->width, ctx->height, ctx->pixfmt, ctx->num_planes);
+    log_printf("V4L2: %ux%u format=0x%08x planes=%u\n", ctx->width, ctx->height, ctx->pixfmt, ctx->num_planes);
 
     if (fps > 0) {
         struct v4l2_streamparm parm;
@@ -117,9 +118,9 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
         parm.parm.capture.timeperframe.numerator = 1;
         parm.parm.capture.timeperframe.denominator = fps;
         if (v4l2_ioctl(ctx->fd, VIDIOC_S_PARM, &parm) < 0) {
-            perror("VIDIOC_S_PARM (fps)");
+            log_perror("VIDIOC_S_PARM (fps)");
         } else {
-            printf("V4L2: fps=%u/%u\n",
+            log_printf("V4L2: fps=%u/%u\n",
                    parm.parm.capture.timeperframe.denominator,
                    parm.parm.capture.timeperframe.numerator);
         }
@@ -131,7 +132,7 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
     req.memory = V4L2_MEMORY_MMAP;
 
     if (v4l2_ioctl(ctx->fd, VIDIOC_REQBUFS, &req) < 0) {
-        perror("VIDIOC_REQBUFS");
+        log_perror("VIDIOC_REQBUFS");
         return -1;
     }
 
@@ -155,7 +156,7 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
         }
 
         if (v4l2_ioctl(ctx->fd, VIDIOC_QUERYBUF, &buf) < 0) {
-            perror("VIDIOC_QUERYBUF");
+            log_perror("VIDIOC_QUERYBUF");
             return -1;
         }
 
@@ -168,7 +169,7 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
                                                 MAP_SHARED, ctx->fd,
                                                 planes[p].m.mem_offset);
                 if (ctx->buffers[i].start[p] == MAP_FAILED) {
-                    perror("mmap");
+                    log_perror("mmap");
                     return -1;
                 }
             }
@@ -180,7 +181,7 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
                                             MAP_SHARED, ctx->fd,
                                             buf.m.offset);
             if (ctx->buffers[i].start[0] == MAP_FAILED) {
-                perror("mmap");
+                log_perror("mmap");
                 return -1;
             }
         }
@@ -210,13 +211,13 @@ static int v4l2_capture_start(v4l2_capture_t *ctx)
         }
 
         if (v4l2_ioctl(ctx->fd, VIDIOC_QBUF, &buf) < 0) {
-            perror("VIDIOC_QBUF");
+            log_perror("VIDIOC_QBUF");
             return -1;
         }
     }
 
     if (v4l2_ioctl(ctx->fd, VIDIOC_STREAMON, &ctx->buf_type) < 0) {
-        perror("VIDIOC_STREAMON");
+        log_perror("VIDIOC_STREAMON");
         return -1;
     }
 
@@ -226,6 +227,36 @@ static int v4l2_capture_start(v4l2_capture_t *ctx)
 static int v4l2_capture_stop(v4l2_capture_t *ctx)
 {
     v4l2_ioctl(ctx->fd, VIDIOC_STREAMOFF, &ctx->buf_type);
+    return 0;
+}
+
+static int v4l2_capture_wait_for_frame(v4l2_capture_t *ctx, int timeout_ms)
+{
+    fd_set fds;
+    struct timeval tv;
+
+    FD_ZERO(&fds);
+    FD_SET(ctx->fd, &fds);
+
+    for (int retry = 0; retry < 5; retry++) {
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+        int r = select(ctx->fd + 1, &fds, NULL, NULL, &tv);
+        if (r < 0) {
+            if (errno == EINTR) {
+                log_errorf("v4l2_capture_wait_for_frame: select interrupted, retry %d...\n", retry);
+                continue;
+            }
+            return r;
+        } else if (r > 0) {
+            return r;
+        } else {
+            log_errorf("v4l2_capture_wait_for_frame: timeout waiting for frame, retry %d...\n", retry);
+            usleep(10000); // 10 ms
+        }
+    }
+
     return 0;
 }
 
@@ -246,7 +277,7 @@ static int v4l2_capture_read_frame(v4l2_capture_t *ctx, struct v4l2_buffer *buf,
     if (v4l2_ioctl(ctx->fd, VIDIOC_DQBUF, buf) < 0) {
         if (errno == EAGAIN)
             return 0;
-        perror("VIDIOC_DQBUF");
+        log_perror("VIDIOC_DQBUF");
         return -1;
     }
 
@@ -256,7 +287,7 @@ static int v4l2_capture_read_frame(v4l2_capture_t *ctx, struct v4l2_buffer *buf,
 static int v4l2_capture_release_frame(v4l2_capture_t *ctx, struct v4l2_buffer *buf)
 {
     if (v4l2_ioctl(ctx->fd, VIDIOC_QBUF, buf) < 0) {
-        perror("VIDIOC_QBUF");
+        log_perror("VIDIOC_QBUF");
         return -1;
     }
     return 0;

@@ -8,6 +8,7 @@
 #include <rockchip/mpp_buffer.h>
 #include <rockchip/mpp_frame.h>
 #include <rockchip/mpp_packet.h>
+#include "log.h"
 
 typedef struct {
     MppCtx ctx;
@@ -34,13 +35,13 @@ __attribute__((unused)) static int mpp_jpeg_decoder_init(mpp_dec_ctx_t *ctx, uns
 
     ret = mpp_create(&ctx->ctx, &ctx->mpi);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_create failed: %d\n", ret);
+        log_errorf("mpp_create failed: %d\n", ret);
         return -1;
     }
 
     ret = mpp_init(ctx->ctx, MPP_CTX_DEC, MPP_VIDEO_CodingMJPEG);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_init decoder failed: %d\n", ret);
+        log_errorf("mpp_init decoder failed: %d\n", ret);
         return -1;
     }
 
@@ -51,27 +52,27 @@ __attribute__((unused)) static int mpp_jpeg_decoder_init(mpp_dec_ctx_t *ctx, uns
     mpp_dec_cfg_deinit(cfg);
 
     if (ret != MPP_OK) {
-        fprintf(stderr, "MPP_DEC_SET_CFG failed: %d\n", ret);
+        log_errorf("MPP_DEC_SET_CFG failed: %d\n", ret);
         return -1;
     }
 
     if (MPP_FRAME_FMT_IS_YUV(fmt) || MPP_FRAME_FMT_IS_RGB(fmt)) {
         ret = ctx->mpi->control(ctx->ctx, MPP_DEC_SET_OUTPUT_FORMAT, &fmt);
         if (ret != MPP_OK) {
-            fprintf(stderr, "Failed to set output format 0x%x\n", fmt);
+            log_errorf("Failed to set output format 0x%x\n", fmt);
             return -1;
         }
     }
 
     ret = mpp_buffer_group_get_internal(&ctx->pkt_grp, MPP_BUFFER_TYPE_ION);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal pkt failed: %d\n", ret);
+        log_errorf("mpp_buffer_group_get_internal pkt failed: %d\n", ret);
         return -1;
     }
 
     ret = mpp_buffer_group_get_internal(&ctx->frm_grp, MPP_BUFFER_TYPE_ION);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_group_get_internal frm failed: %d\n", ret);
+        log_errorf("mpp_buffer_group_get_internal frm failed: %d\n", ret);
         return -1;
     }
 
@@ -94,7 +95,7 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
 
     ret = mpp_buffer_get(ctx->pkt_grp, &pkt_buf, size);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_get pkt failed: %d\n", ret);
+        log_errorf("mpp_buffer_get pkt failed: %d\n", ret);
         return NULL;
     }
 
@@ -102,7 +103,7 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
 
     ret = mpp_packet_init_with_buffer(&packet, pkt_buf);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_packet_init_with_buffer failed: %d\n", ret);
+        log_errorf("mpp_packet_init_with_buffer failed: %d\n", ret);
         mpp_buffer_put(pkt_buf);
         return NULL;
     }
@@ -110,7 +111,7 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
 
     ret = mpp_buffer_get(ctx->frm_grp, &frm_buf, frame_size);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_buffer_get frm failed: %d\n", ret);
+        log_errorf("mpp_buffer_get frm failed: %d\n", ret);
         mpp_packet_deinit(&packet);
         mpp_buffer_put(pkt_buf);
         return NULL;
@@ -118,7 +119,7 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
 
     ret = mpp_frame_init(&frame);
     if (ret != MPP_OK) {
-        fprintf(stderr, "mpp_frame_init failed: %d\n", ret);
+        log_errorf("mpp_frame_init failed: %d\n", ret);
         mpp_packet_deinit(&packet);
         mpp_buffer_put(pkt_buf);
         mpp_buffer_put(frm_buf);
@@ -133,13 +134,13 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
 
     ret = ctx->mpi->poll(ctx->ctx, MPP_PORT_INPUT, MPP_POLL_BLOCK);
     if (ret != MPP_OK) {
-        fprintf(stderr, "poll input failed: %d\n", ret);
+        log_errorf("poll input failed: %d\n", ret);
         goto error;
     }
 
     ret = ctx->mpi->dequeue(ctx->ctx, MPP_PORT_INPUT, &task);
     if (ret != MPP_OK || !task) {
-        fprintf(stderr, "dequeue input failed: %d\n", ret);
+        log_errorf("dequeue input failed: %d\n", ret);
         goto error;
     }
 
@@ -148,19 +149,19 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
 
     ret = ctx->mpi->enqueue(ctx->ctx, MPP_PORT_INPUT, task);
     if (ret != MPP_OK) {
-        fprintf(stderr, "enqueue input failed: %d\n", ret);
+        log_errorf("enqueue input failed: %d\n", ret);
         goto error;
     }
 
     ret = ctx->mpi->poll(ctx->ctx, MPP_PORT_OUTPUT, MPP_POLL_BLOCK);
     if (ret != MPP_OK) {
-        fprintf(stderr, "poll output failed: %d\n", ret);
+        log_errorf("poll output failed: %d\n", ret);
         goto error;
     }
 
     ret = ctx->mpi->dequeue(ctx->ctx, MPP_PORT_OUTPUT, &task);
     if (ret != MPP_OK || !task) {
-        fprintf(stderr, "dequeue output failed: %d\n", ret);
+        log_errorf("dequeue output failed: %d\n", ret);
         goto error;
     }
 
@@ -169,7 +170,7 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
 
     ret = ctx->mpi->enqueue(ctx->ctx, MPP_PORT_OUTPUT, task);
     if (ret != MPP_OK) {
-        fprintf(stderr, "enqueue output failed: %d\n", ret);
+        log_errorf("enqueue output failed: %d\n", ret);
     }
 
     mpp_packet_deinit(&packet);
