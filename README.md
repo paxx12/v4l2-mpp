@@ -11,6 +11,7 @@ V4L2 camera capture and streaming tools with Rockchip MPP hardware encoding for 
 | stream-http | HTTP server for camera streaming (snapshots, MJPEG, H264, browser player) |
 | stream-snap-mqtt | Snapmaker U1 camera interface (timelapse, monitoring, MQTT control) |
 | stream-webrtc | WebRTC server for low-latency H264 video streaming |
+| fake-service | Process supervisor with automatic restart on failure and syslog support |
 
 ## Building
 
