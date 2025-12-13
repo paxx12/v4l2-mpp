@@ -491,7 +491,7 @@ int main(int argc, char* argv[]) {
             {listen_fd, POLLIN, 0},
             {g_h264_stream.fd, POLLIN, 0}
         };
-        int ret = poll(pfd, 2, 100);
+        int ret = poll(pfd, 2, 1000);
 
         if (ret > 0 && (pfd[0].revents & POLLIN)) {
             int client_fd = accept(listen_fd, nullptr, nullptr);
