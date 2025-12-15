@@ -243,18 +243,16 @@ static int v4l2_capture_wait_for_frame(v4l2_capture_t *ctx, int timeout_ms)
         tv.tv_usec = (timeout_ms % 1000) * 1000;
 
         int r = select(ctx->fd + 1, &fds, NULL, NULL, &tv);
-        if (r < 0) {
-            if (errno == EINTR) {
-                log_errorf("v4l2_capture_wait_for_frame: select interrupted, retry %d...\n", retry);
-                continue;
-            }
-            return r;
-        } else if (r > 0) {
-            return r;
-        } else {
+        if (r < 0 && errno == EINTR) {
+            log_errorf("v4l2_capture_wait_for_frame: select interrupted, retry %d...\n", retry);
+            continue;
+        } else if (r == 0) {
             log_errorf("v4l2_capture_wait_for_frame: timeout waiting for frame, retry %d...\n", retry);
-            usleep(10000); // 10 ms
+            usleep(10000);
+            continue;
         }
+
+        return r;
     }
 
     return 0;
