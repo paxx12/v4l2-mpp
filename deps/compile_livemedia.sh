@@ -21,6 +21,15 @@ if [[ ! -d live ]]; then
 fi
 
 cd live
-./genMakefiles linux-no-std-lib
+
+CONFIG_FILE=linux.no-std-lib
+
+if [[ -n "$CROSS_COMPILE" ]]; then
+  cp config.armlinux config.armlinux-no-std-lib
+  echo "CPLUSPLUS_FLAGS += -DNO_STD_LIB=1" >> config.armlinux-no-std-lib
+  CONFIG_FILE=armlinux-no-std-lib
+fi
+
+./genMakefiles "$CONFIG_FILE"
 rm -rf usr-local
 make -j$(nproc) install PREFIX="$(pwd)/usr-local"
