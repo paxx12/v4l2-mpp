@@ -1,7 +1,7 @@
 #!/bin/bash
 
 FILENAME=live.2025.11.06.tar.gz
-URL=http://www.live555.com/liveMedia/public/live.2025.11.06.tar.gz
+URL=https://download.videolan.org/pub/contrib/live555/$FILENAME
 SHA256=7614fa0a293e61b24bfd715a30a1c020fb4fe5490ebb02e71b0dadb5efc1d17c
 
 DIR=$(realpath "$(dirname "$0")")
