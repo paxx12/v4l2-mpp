@@ -15,6 +15,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -343,23 +344,41 @@ HTML_PAGE = """<!doctype html>
       return cameraUrlInput.value.trim();
     }}
 
+    function appendCacheBuster(url) {{
+      const marker = url.includes('?') ? '&' : '?';
+      return `${{url}}${{marker}}t=${{Date.now()}}`;
+    }}
+
     function buildCameraUrl(camInfo, mode) {{
-      const suffix = mode === 'webrtc'
-        ? `${{camInfo.prefix}}webrtc`
-        : (mode === 'mjpg'
-          ? `${{camInfo.prefix}}stream.mjpg`
-          : `${{camInfo.prefix}}snapshot.jpg?t=${{Date.now()}}`);
+      const suffix = (camInfo.streams && camInfo.streams[mode])
+        ? camInfo.streams[mode]
+        : (mode === 'webrtc'
+          ? `${{camInfo.prefix}}webrtc`
+          : (mode === 'mjpg'
+            ? `${{camInfo.prefix}}stream.mjpg`
+            : `${{camInfo.prefix}}snapshot.jpg`));
       let base = getCameraUrl();
+      let url;
       if (base.includes('{{path}}')) {{
-        return base.replace('{{path}}', suffix);
+        url = base.replace('{{path}}', suffix);
+      }} else if (base.includes('{{prefix}}') || base.includes('{{mode}}') || base.includes('{{cam}}') || base.includes('{{device}}') || base.includes('{{index}}') || base.includes('{{basename}}')) {{
+        url = base
+          .replace('{{prefix}}', camInfo.prefix)
+          .replace('{{mode}}', mode)
+          .replace('{{cam}}', camInfo.cam)
+          .replace('{{device}}', camInfo.device)
+          .replace('{{index}}', camInfo.index)
+          .replace('{{basename}}', camInfo.basename);
+      }} else {{
+        if (!base.endsWith('/')) {{
+          base += '/';
+        }}
+        url = `${{base}}${{suffix}}`;
       }}
-      if (base.includes('{{prefix}}') || base.includes('{{mode}}')) {{
-        return base.replace('{{prefix}}', camInfo.prefix).replace('{{mode}}', mode);
+      if (mode === 'snapshot') {{
+        return appendCacheBuster(url);
       }}
-      if (!base.endsWith('/')) {{
-        base += '/';
-      }}
-      return `${{base}}${{suffix}}`;
+      return url;
     }}
 
     function apiUrl(path) {{
@@ -654,6 +673,9 @@ class Camera:
     cam: str
     device: str
     prefix: str
+    streams: Dict[str, str]
+    index: int
+    basename: str
 
 
 def log(msg: str) -> None:
@@ -807,7 +829,19 @@ def index():
 @APP.route("/api/cams")
 def api_cams():
     cams = APP.config["cams"]
-    return jsonify([{"cam": cam.cam, "device": cam.device, "prefix": cam.prefix} for cam in cams])
+    return jsonify(
+        [
+            {
+                "cam": cam.cam,
+                "device": cam.device,
+                "prefix": cam.prefix,
+                "streams": cam.streams,
+                "index": cam.index,
+                "basename": cam.basename,
+            }
+            for cam in cams
+        ]
+    )
 
 
 @APP.route("/api/v4l2/ctrls")
@@ -894,7 +928,57 @@ def api_info():
     return jsonify({"info": out1})
 
 
-def build_cams(devices: List[str]) -> List[Camera]:
+def normalize_prefix(prefix: str) -> str:
+    if not prefix:
+        return prefix
+    if not prefix.startswith("/"):
+        prefix = f"/{prefix}"
+    if not prefix.endswith("/"):
+        prefix = f"{prefix}/"
+    return prefix
+
+
+def parse_stream_prefixes(items: List[str]) -> Dict[str, str]:
+    prefixes: Dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise SystemExit(f"Invalid --stream-prefix value: {item}")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            raise SystemExit(f"Invalid --stream-prefix value: {item}")
+        prefixes[key] = normalize_prefix(value)
+    return prefixes
+
+
+def format_stream_path(template: str, data: Dict[str, str]) -> str:
+    try:
+        return template.format(**data)
+    except KeyError:
+        return template
+
+
+def infer_default_prefix(device: str, idx: int) -> str:
+    base = os.path.basename(device)
+    match = re.match(r"video(\d+)$", base)
+    if match:
+        number = int(match.group(1))
+        if number >= 11:
+            derived_idx = number - 10
+            if derived_idx == 1:
+                return "/webcam/"
+            return f"/webcam{derived_idx}/"
+    if idx == 1:
+        return "/webcam/"
+    return f"/webcam{idx}/"
+
+
+def build_cams(
+    devices: List[str],
+    prefixes: Dict[str, str],
+    stream_templates: Dict[str, str],
+) -> List[Camera]:
     cams = []
     seen = set()
     for idx, device in enumerate(devices, start=1):
@@ -906,11 +990,35 @@ def build_cams(devices: List[str]) -> List[Camera]:
                 suffix += 1
             cam_id = f"{cam_id}-{suffix}"
         seen.add(cam_id)
-        if idx == 1:
-            prefix = "/webcam/"
-        else:
-            prefix = f"/webcam{idx}/"
-        cams.append(Camera(cam=cam_id, device=device, prefix=prefix))
+        prefix = (
+            prefixes.get(device)
+            or prefixes.get(base)
+            or prefixes.get(cam_id)
+            or infer_default_prefix(device, idx)
+        )
+        prefix = normalize_prefix(prefix)
+        template_data = {
+            "prefix": prefix,
+            "cam": cam_id,
+            "device": device,
+            "basename": base,
+            "index": str(idx),
+        }
+        streams = {}
+        for mode, template in stream_templates.items():
+            data = dict(template_data)
+            data["mode"] = mode
+            streams[mode] = format_stream_path(template, data)
+        cams.append(
+            Camera(
+                cam=cam_id,
+                device=device,
+                prefix=prefix,
+                streams=streams,
+                index=idx,
+                basename=base,
+            )
+        )
     return cams
 
 
@@ -923,6 +1031,27 @@ def main() -> None:
     parser.add_argument("--base-url", dest="camera_url", help=argparse.SUPPRESS)
     parser.add_argument("--app-base-url", default="", help="Base URL path for UI routing (optional)")
     parser.add_argument("--title", default="", help="Optional page title")
+    parser.add_argument(
+        "--stream-prefix",
+        action="append",
+        default=[],
+        help="Override stream prefix per camera (format: key=/path/ where key is device path, basename, or cam id)",
+    )
+    parser.add_argument(
+        "--stream-path-webrtc",
+        default="{prefix}webrtc",
+        help="Template for WebRTC stream path (default: {prefix}webrtc)",
+    )
+    parser.add_argument(
+        "--stream-path-mjpg",
+        default="{prefix}stream.mjpg",
+        help="Template for MJPG stream path (default: {prefix}stream.mjpg)",
+    )
+    parser.add_argument(
+        "--stream-path-snapshot",
+        default="{prefix}snapshot.jpg",
+        help="Template for snapshot stream path (default: {prefix}snapshot.jpg)",
+    )
     args = parser.parse_args()
 
     devices = args.device or detect_devices()
@@ -936,7 +1065,13 @@ def main() -> None:
     if app_base_url and not app_base_url.endswith("/"):
         app_base_url += "/"
 
-    cams = build_cams(devices)
+    prefixes = parse_stream_prefixes(args.stream_prefix)
+    stream_templates = {
+        "webrtc": args.stream_path_webrtc,
+        "mjpg": args.stream_path_mjpg,
+        "snapshot": args.stream_path_snapshot,
+    }
+    cams = build_cams(devices, prefixes, stream_templates)
     APP.config["cams"] = cams
     APP.config["camera_url"] = args.camera_url
     APP.config["app_base_url"] = app_base_url

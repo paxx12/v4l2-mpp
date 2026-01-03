@@ -40,6 +40,26 @@ python3 v4l2-ctrls.py \
   --title "My Camera System"
 ```
 
+**Custom stream endpoints:**
+```sh
+python3 v4l2-ctrls.py \
+  --device /dev/video12 \
+  --stream-prefix /dev/video12=/webcam2/ \
+  --stream-path-webrtc "{prefix}webrtc" \
+  --stream-path-mjpg "{prefix}stream.mjpg" \
+  --stream-path-snapshot "{prefix}snapshot.jpg"
+```
+
+**Non-standard stream backend:**
+```sh
+python3 v4l2-ctrls.py \
+  --device /dev/video0 \
+  --stream-prefix /dev/video0=/camera/ \
+  --stream-path-webrtc "{prefix}live.webrtc" \
+  --stream-path-mjpg "{prefix}feed.mjpeg" \
+  --stream-path-snapshot "{prefix}snap.png"
+```
+
 ## Command-line Options
 
 - `--device <path>` - V4L2 device path (can be specified multiple times; auto-detects if omitted)
@@ -48,6 +68,10 @@ python3 v4l2-ctrls.py \
 - `--camera-url <url>` - Base URL for camera streams (default: `http://127.0.0.1/`)
 - `--app-base-url <path>` - Base URL path for UI routing when behind a reverse proxy (optional)
 - `--title <text>` - Custom page title (optional)
+- `--stream-prefix <key=path>` - Override stream prefix per camera (key can be device path, basename, or cam id)
+- `--stream-path-webrtc <template>` - Template for WebRTC stream path (default: `{prefix}webrtc`)
+- `--stream-path-mjpg <template>` - Template for MJPG stream path (default: `{prefix}stream.mjpg`)
+- `--stream-path-snapshot <template>` - Template for snapshot stream path (default: `{prefix}snapshot.jpg`)
 
 ## URL Template Variables
 
@@ -56,6 +80,10 @@ The `--camera-url` option supports template variables for flexible stream routin
 - `{path}` - Full path including camera prefix and mode (e.g., `/webcam/stream.mjpg`)
 - `{prefix}` - Camera prefix only (e.g., `/webcam/`)
 - `{mode}` - Preview mode (e.g., `webrtc`, `mjpg`, `snapshot`)
+- `{cam}` - Camera id (e.g., `video12`)
+- `{device}` - Device path (e.g., `/dev/video12`)
+- `{index}` - Camera index in the list (1-based)
+- `{basename}` - Device basename (e.g., `video12`)
 
 **Examples:**
 ```sh
@@ -68,6 +96,11 @@ The `--camera-url` option supports template variables for flexible stream routin
 # Custom routing with prefix and mode
 --camera-url http://192.168.1.100/{prefix}{mode}
 ```
+
+## Stream Path Templates
+
+The stream path options (`--stream-path-webrtc`, `--stream-path-mjpg`, `--stream-path-snapshot`) support the same
+template variables as above, plus `{basename}` for the device basename (e.g., `video12`).
 
 ## API Endpoints
 
