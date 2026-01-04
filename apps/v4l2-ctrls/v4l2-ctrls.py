@@ -16,6 +16,7 @@ import glob
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -329,6 +330,9 @@ HTML_PAGE = """<!doctype html>
     let lastControls = [];
     let autoApplyTimeout = null;
 
+    // Use instance-specific localStorage keys to isolate multiple instances
+    const storageKey = (key) => `v4l2ctrls-{storage_prefix}-${{key}}`;
+
     const GROUPS = [
       {{ key: 'focus', title: 'Focus', match: name => name.includes('focus') }},
       {{ key: 'exposure', title: 'Exposure', match: name => name.includes('exposure') }},
@@ -347,7 +351,7 @@ HTML_PAGE = """<!doctype html>
       }} else {{
         document.documentElement.setAttribute('data-theme', theme);
       }}
-      localStorage.setItem('v4l2ctrls-theme', theme);
+      localStorage.setItem(storageKey('theme'), theme);
     }}
 
     function getCameraUrl() {{
@@ -383,7 +387,8 @@ HTML_PAGE = """<!doctype html>
         if (!base.endsWith('/')) {{
           base += '/';
         }}
-        url = `${{base}}${{suffix}}`;
+        const cleanSuffix = suffix.startsWith('/') ? suffix.substring(1) : suffix;
+        url = `${{base}}${{cleanSuffix}}`;
       }}
       if (mode === 'snapshot') {{
         return appendCacheBuster(url);
@@ -413,9 +418,9 @@ HTML_PAGE = """<!doctype html>
       }} else {{
         preview.innerHTML = `<img src="${{previewUrl}}" alt="Snapshot" />`;
       }}
-      localStorage.setItem('v4l2ctrls-base-url', cameraUrlInput.value);
-      localStorage.setItem('v4l2ctrls-preview-mode', mode);
-      localStorage.setItem('v4l2ctrls-cam', cam);
+      localStorage.setItem(storageKey('base-url'), cameraUrlInput.value);
+      localStorage.setItem(storageKey('preview-mode'), mode);
+      localStorage.setItem(storageKey('cam'), cam);
     }}
 
     function buildControl(control) {{
@@ -653,10 +658,10 @@ HTML_PAGE = """<!doctype html>
     }}
 
     async function init() {{
-      const storedTheme = localStorage.getItem('v4l2ctrls-theme') || 'system';
+      const storedTheme = localStorage.getItem(storageKey('theme')) || 'system';
       themeSelect.value = storedTheme;
       applyTheme(storedTheme);
-      const storedBase = localStorage.getItem('v4l2ctrls-base-url');
+      const storedBase = localStorage.getItem(storageKey('base-url'));
       cameraUrlInput.value = storedBase || '{camera_url}';
       const camsResp = await fetch(apiUrl('api/cams'));
       cams = await camsResp.json();
@@ -665,15 +670,15 @@ HTML_PAGE = """<!doctype html>
         const opt = new Option(cam.cam, cam.cam);
         cameraSelect.add(opt);
       }});
-      const storedCam = localStorage.getItem('v4l2ctrls-cam');
+      const storedCam = localStorage.getItem(storageKey('cam'));
       if (storedCam && cams.find(c => c.cam === storedCam)) {{
         cameraSelect.value = storedCam;
       }}
-      const storedMode = localStorage.getItem('v4l2ctrls-preview-mode');
+      const storedMode = localStorage.getItem(storageKey('preview-mode'));
       if (storedMode) {{
         previewMode.value = storedMode;
       }}
-      const storedAutoApply = localStorage.getItem('v4l2ctrls-auto-apply');
+      const storedAutoApply = localStorage.getItem(storageKey('auto-apply'));
       if (storedAutoApply === 'true') {{
         autoApplyCheckbox.checked = true;
       }}
@@ -688,7 +693,7 @@ HTML_PAGE = """<!doctype html>
       applyTheme(themeSelect.value);
     }});
     autoApplyCheckbox.addEventListener('change', () => {{
-      localStorage.setItem('v4l2ctrls-auto-apply', autoApplyCheckbox.checked);
+      localStorage.setItem(storageKey('auto-apply'), autoApplyCheckbox.checked);
     }});
     cameraSelect.addEventListener('change', async () => {{
       updatePreview();
@@ -897,7 +902,14 @@ def index():
     title = APP.config.get("title") or "V4L2 Controls"
     camera_url = APP.config.get("camera_url")
     app_base_url = APP.config.get("app_base_url") or "./"
-    return HTML_PAGE.format(title=title, camera_url=camera_url, app_base_url=app_base_url)
+    port = APP.config.get("port", "5000")
+    socket_mode = APP.config.get("socket_mode", False)
+    
+    # Compute storage prefix for localStorage isolation based on port and path
+    path_part = app_base_url.strip("/").replace("/", "-") if app_base_url and app_base_url != "./" else ""
+    storage_prefix = path_part or "default" if socket_mode else (f"{port}-{path_part}" if path_part else str(port))
+    
+    return HTML_PAGE.format(title=title, camera_url=camera_url, app_base_url=app_base_url, storage_prefix=storage_prefix)
 
 
 @APP.route("/api/cams")
@@ -1074,7 +1086,14 @@ def format_stream_path(template: str, data: Dict[str, str]) -> str:
         return template
 
 
-def infer_default_prefix(device: str, idx: int) -> str:
+def infer_default_prefix(device: str, idx: int, use_default_mapping: bool = True) -> str:
+    # When camera URL is explicitly provided, don't guess from device name
+    if not use_default_mapping:
+        if idx == 1:
+            return "/webcam/"
+        return f"/webcam{idx}/"
+    
+    # When using default camera URL, try to infer from device name
     base = os.path.basename(device)
     match = re.match(r"video(\d+)$", base)
     if match:
@@ -1093,6 +1112,7 @@ def build_cams(
     devices: List[str],
     prefixes: Dict[str, str],
     stream_templates: Dict[str, str],
+    use_default_mapping: bool = True,
 ) -> List[Camera]:
     cams = []
     seen = set()
@@ -1109,7 +1129,7 @@ def build_cams(
             prefixes.get(device)
             or prefixes.get(base)
             or prefixes.get(cam_id)
-            or infer_default_prefix(device, idx)
+            or infer_default_prefix(device, idx, use_default_mapping)
         )
         prefix = normalize_prefix(prefix)
         template_data = {
@@ -1137,11 +1157,88 @@ def build_cams(
     return cams
 
 
+def run_socket_server(sock_path: str) -> None:
+    """Run Unix socket server that handles API requests."""
+    if os.path.exists(sock_path):
+        os.unlink(sock_path)
+    
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.bind(sock_path)
+    sock.listen(5)
+    os.chmod(sock_path, 0o666)
+    
+    log(f"Socket server listening on {sock_path}")
+    
+    try:
+        while True:
+            conn, _ = sock.accept()
+            try:
+                data = b""
+                while True:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                    if b'\n' in data:
+                        break
+                
+                if data:
+                    req = json.loads(data.decode().strip())
+                    
+                    # Use Flask's test client to handle the request
+                    with APP.test_client() as client:
+                        method = req.get("method", "GET").upper()
+                        path = req.get("path", "/")
+                        query = req.get("query", {})
+                        body = req.get("body", {})
+                        
+                        # Build query string
+                        if query:
+                            from urllib.parse import urlencode
+                            path = f"{path}?{urlencode(query)}"
+                        
+                        # Make request
+                        if method == "POST":
+                            response = client.post(path, json=body)
+                        else:
+                            response = client.get(path)
+                        
+                        # Build response
+                        result = {
+                            "status": response.status_code,
+                            "headers": dict(response.headers),
+                            "body": response.get_data(as_text=True)
+                        }
+                        
+                        # If response is JSON, parse it
+                        if response.content_type and 'application/json' in response.content_type:
+                            try:
+                                result["body"] = json.loads(result["body"])
+                            except:
+                                pass
+                        
+                        conn.sendall((json.dumps(result) + '\n').encode())
+            except Exception as e:
+                log(f"Socket request error: {e}")
+                error_response = {"status": 500, "body": {"error": str(e)}}
+                try:
+                    conn.sendall((json.dumps(error_response) + '\n').encode())
+                except:
+                    pass
+            finally:
+                conn.close()
+    finally:
+        sock.close()
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="V4L2 control UI")
     parser.add_argument("--device", action="append", default=[], help="V4L2 device path")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
-    parser.add_argument("--port", type=int, default=5000, help="Port to bind")
+    parser.add_argument("--host", help="Host to bind (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, help="Port to bind (default: 5000)")
+    parser.add_argument("--socket", help="Unix socket path (if set, runs socket server)")
     parser.add_argument("--camera-url", default="http://127.0.0.1/", help="Camera stream base URL")
     parser.add_argument("--base-url", dest="camera_url", help=argparse.SUPPRESS)
     parser.add_argument("--app-base-url", default="", help="Base URL path for UI routing (optional)")
@@ -1186,14 +1283,43 @@ def main() -> None:
         "mjpg": args.stream_path_mjpg,
         "snapshot": args.stream_path_snapshot,
     }
-    cams = build_cams(devices, prefixes, stream_templates)
+    # Only use default video number mapping if camera URL is the default
+    use_default_mapping = args.camera_url == "http://127.0.0.1/"
+    cams = build_cams(devices, prefixes, stream_templates, use_default_mapping)
     APP.config["cams"] = cams
     APP.config["camera_url"] = args.camera_url
     APP.config["app_base_url"] = app_base_url
     APP.config["title"] = args.title
-
-    log(f"Starting v4l2-ctrls on {args.host}:{args.port} for {len(cams)} camera(s)")
-    APP.run(host=args.host, port=args.port, threaded=True)
+    
+    # Determine which listeners to start
+    start_socket = bool(args.socket)
+    start_tcp = args.host is not None or args.port is not None
+    
+    if not start_socket and not start_tcp:
+        raise SystemExit("No listener configured. Provide --socket and/or --host/--port.")
+    
+    # Set TCP defaults if starting TCP listener
+    host = args.host if args.host is not None else "0.0.0.0"
+    port = args.port if args.port is not None else 5000
+    
+    APP.config["port"] = port
+    APP.config["socket_mode"] = start_socket and not start_tcp
+    
+    # Start listeners
+    if start_socket and start_tcp:
+        # Run both: socket in thread, TCP in main
+        import threading
+        socket_thread = threading.Thread(target=run_socket_server, args=(args.socket,), daemon=True)
+        socket_thread.start()
+        log(f"Starting v4l2-ctrls socket server at {args.socket} for {len(cams)} camera(s)")
+        log(f"Starting v4l2-ctrls HTTP server on {host}:{port} for {len(cams)} camera(s)")
+        APP.run(host=host, port=port, threaded=True)
+    elif start_socket:
+        log(f"Starting v4l2-ctrls socket server at {args.socket} for {len(cams)} camera(s)")
+        run_socket_server(args.socket)
+    else:
+        log(f"Starting v4l2-ctrls HTTP server on {host}:{port} for {len(cams)} camera(s)")
+        APP.run(host=host, port=port, threaded=True)
 
 
 if __name__ == "__main__":
