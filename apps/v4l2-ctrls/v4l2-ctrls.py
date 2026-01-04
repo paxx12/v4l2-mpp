@@ -28,9 +28,11 @@ APP = Flask(__name__)
 
 CONTROL_ORDER = [
     "focus_auto",
+    "focus_automatic_continuous",
     "focus_absolute",
     "exposure_auto",
     "exposure_absolute",
+    "exposure_time_absolute",
     "white_balance_temperature_auto",
     "white_balance_temperature",
     "brightness",
@@ -292,7 +294,13 @@ HTML_PAGE = """<!doctype html>
       <div class=\"note\">Changes are not persisted; persistence is handled by the streamer/service.</div>
     </section>
     <section class=\"panel\">
-      <h2>Controls</h2>
+      <div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;\">
+        <h2 style=\"margin:0;\">Controls</h2>
+        <label style=\"display:flex; gap:8px; align-items:center; cursor:pointer; margin:0;\">
+          <input type=\"checkbox\" id=\"auto-apply\" style=\"width:auto; cursor:pointer;\" />
+          <span style=\"font-size:14px;\">Auto-apply</span>
+        </label>
+      </div>
       <div id=\"controls\"></div>
       <div class=\"action-bar\">
         <button id=\"apply\">Apply changes</button>
@@ -314,10 +322,12 @@ HTML_PAGE = """<!doctype html>
     const resetButton = document.getElementById('reset');
     const statusBox = document.getElementById('status');
     const themeSelect = document.getElementById('theme-select');
+    const autoApplyCheckbox = document.getElementById('auto-apply');
 
     let cams = [];
     let currentControls = [];
     let lastControls = [];
+    let autoApplyTimeout = null;
 
     const GROUPS = [
       {{ key: 'focus', title: 'Focus', match: name => name.includes('focus') }},
@@ -442,9 +452,15 @@ HTML_PAGE = """<!doctype html>
           number.value = range.value;
           pill.textContent = range.value;
         }});
+        range.addEventListener('change', () => {{
+          scheduleAutoApply();
+        }});
         number.addEventListener('input', () => {{
           range.value = number.value;
           pill.textContent = number.value;
+        }});
+        number.addEventListener('change', () => {{
+          scheduleAutoApply();
         }});
         row.appendChild(range);
         row.appendChild(pill);
@@ -459,6 +475,9 @@ HTML_PAGE = """<!doctype html>
         select.add(off);
         select.add(on);
         select.value = String(control.value || 0);
+        select.addEventListener('change', () => {{
+          scheduleAutoApply();
+        }});
         wrapper.appendChild(select);
       }} else if (control.type === 'menu') {{
         const select = document.createElement('select');
@@ -469,6 +488,9 @@ HTML_PAGE = """<!doctype html>
           select.add(opt);
         }});
         select.value = String(control.value || 0);
+        select.addEventListener('change', () => {{
+          scheduleAutoApply();
+        }});
         wrapper.appendChild(select);
       }} else {{
         const span = document.createElement('div');
@@ -518,8 +540,10 @@ HTML_PAGE = """<!doctype html>
       }});
     }}
 
-    async function fetchControls(cam) {{
-      logStatus('Loading controls...');
+    async function fetchControls(cam, silent = false) {{
+      if (!silent) {{
+        logStatus('Loading controls...');
+      }}
       try {{
         const response = await fetch(apiUrl(`api/v4l2/ctrls?cam=${{encodeURIComponent(cam)}}`));
         const data = await response.json();
@@ -529,10 +553,14 @@ HTML_PAGE = """<!doctype html>
         currentControls = data.controls || data;
         lastControls = JSON.parse(JSON.stringify(currentControls));
         renderControls(currentControls);
-        logStatus(`Loaded ${{currentControls.length}} controls.`);
+        if (!silent) {{
+          logStatus(`Loaded ${{currentControls.length}} controls.`);
+        }}
       }} catch (err) {{
         renderControls([]);
-        logStatus(`Error: ${{err.message}}`);
+        if (!silent) {{
+          logStatus(`Error: ${{err.message}}`);
+        }}
       }}
     }}
 
@@ -556,6 +584,20 @@ HTML_PAGE = """<!doctype html>
         map[control.name] = control;
       }});
       return map;
+    }}
+
+    function scheduleAutoApply() {{
+      if (!autoApplyCheckbox.checked) {{
+        return;
+      }}
+      // Clear any existing timeout
+      if (autoApplyTimeout) {{
+        clearTimeout(autoApplyTimeout);
+      }}
+      // Schedule apply after 500ms of no changes
+      autoApplyTimeout = setTimeout(() => {{
+        applyChanges();
+      }}, 500);
     }}
 
     async function applyChanges() {{
@@ -589,13 +631,10 @@ HTML_PAGE = """<!doctype html>
           throw new Error(data.stderr || data.error || 'Failed to apply controls');
         }}
         logStatus(`Applied: ${{JSON.stringify(data.applied, null, 2)}}\n${{data.stdout || ''}}`.trim());
-        const updated = controlMap(currentControls);
-        Object.entries(data.applied || {{}}).forEach(([name, value]) => {{
-          if (updated[name]) {{
-            updated[name].value = value;
-          }}
-        }});
-        lastControls = JSON.parse(JSON.stringify(currentControls));
+        
+        // Re-fetch all controls to get updated values (e.g., when auto modes change manual values)
+        await fetchControls(cam, true);
+        
         if (previewMode.value === 'snapshot') {{
           updatePreview();
         }} else {{
@@ -634,6 +673,10 @@ HTML_PAGE = """<!doctype html>
       if (storedMode) {{
         previewMode.value = storedMode;
       }}
+      const storedAutoApply = localStorage.getItem('v4l2ctrls-auto-apply');
+      if (storedAutoApply === 'true') {{
+        autoApplyCheckbox.checked = true;
+      }}
       updatePreview();
       await fetchControls(cameraSelect.value);
       await fetchInfo(cameraSelect.value);
@@ -643,6 +686,9 @@ HTML_PAGE = """<!doctype html>
     previewMode.addEventListener('change', updatePreview);
     themeSelect.addEventListener('change', () => {{
       applyTheme(themeSelect.value);
+    }});
+    autoApplyCheckbox.addEventListener('change', () => {{
+      localStorage.setItem('v4l2ctrls-auto-apply', autoApplyCheckbox.checked);
     }});
     cameraSelect.addEventListener('change', async () => {{
       updatePreview();
@@ -734,6 +780,8 @@ def normalize_type(ctrl_type: Optional[str]) -> str:
         return "bool"
     if ctrl_type.startswith("int"):
         return "int"
+    if ctrl_type == "menu":
+        return "menu"
     return ctrl_type
 
 
@@ -747,12 +795,17 @@ def get_int_from_parts(parts: List[str], field: str) -> Optional[int]:
         return None
 
 
-def parse_ctrls(output: str) -> List[Dict[str, Optional[int]]]:
+def parse_ctrls(output: str) -> List[Dict]:
     controls = []
     for line in output.splitlines():
         line = line.strip()
         if not line or line.startswith("Error"):
             continue
+        
+        # Skip section headers (lines without hex codes)
+        if "0x" not in line:
+            continue
+            
         parts = line.split()
         if not parts:
             continue
@@ -770,39 +823,60 @@ def parse_ctrls(output: str) -> List[Dict[str, Optional[int]]]:
                 "max": get_int_from_parts(parts, "max"),
                 "step": get_int_from_parts(parts, "step"),
                 "value": get_int_from_parts(parts, "value"),
+                "menu": [],
             }
         )
     return controls
 
 
 def parse_ctrl_menus(output: str) -> Dict[str, List[Dict[str, str]]]:
+    """Parse v4l2-ctl --list-ctrls-menus output.
+    
+    Example output format:
+    power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=1 value=1 (50 Hz)
+        0: Disabled
+        1: 50 Hz
+        2: 60 Hz
+    """
     menus: Dict[str, List[Dict[str, str]]] = {}
     current = None
+    
     for line in output.splitlines():
         if not line.strip():
             continue
-        if line and not line.startswith(" "):
-            name = line.split()[0]
+        
+        stripped = line.strip()
+        
+        # Skip section headers
+        if stripped in ["User Controls", "Camera Controls", "Video Controls", "Image Controls"]:
+            continue
+            
+        # Menu items: start with a number followed by colon
+        # Example: "0: Disabled" or "1: 50 Hz"
+        if stripped and stripped[0].isdigit() and ":" in stripped:
+            if current is None:
+                continue
+            parts = stripped.split(":", 1)
+            try:
+                value = int(parts[0].strip())
+                label = parts[1].strip()
+                menus[current].append({"value": value, "label": label})
+            except (ValueError, IndexError):
+                continue
+        # Control name lines: contain hex code like "0x00980918"
+        elif "0x" in stripped:
+            # Extract the control name (first word)
+            name = stripped.split()[0]
             current = name
             menus.setdefault(current, [])
-            continue
-        if current is None:
-            continue
-        menu_line = line.strip()
-        if ":" in menu_line:
-            value_str, label = menu_line.split(":", 1)
-            try:
-                value = int(value_str.strip())
-            except ValueError:
-                continue
-            menus[current].append({"value": value, "label": label.strip()})
+            
     return menus
 
 
-def sort_controls(controls: List[Dict[str, Optional[int]]]) -> List[Dict[str, Optional[int]]]:
+def sort_controls(controls: List[Dict]) -> List[Dict]:
     order_map = {name: idx for idx, name in enumerate(CONTROL_ORDER)}
     indexed = list(enumerate(controls))
-    def sort_key(item: Tuple[int, Dict[str, Optional[int]]]) -> Tuple[int, int]:
+    def sort_key(item: Tuple[int, Dict]) -> Tuple[int, int]:
         original_idx, ctrl = item
         idx = order_map.get(ctrl["name"], len(CONTROL_ORDER))
         return (idx, original_idx)
@@ -851,17 +925,28 @@ def api_ctrls():
     cam, error, code = get_cam_or_400(cam_index, cams)
     if error:
         return error, code
+    
+    # Get basic control list
     code1, out1, err1 = run_v4l2(["v4l2-ctl", "-d", cam.device, "--list-ctrls"])
     if code1 != 0:
         return jsonify({"error": err1 or out1 or "Failed to list controls"}), 500
     controls = parse_ctrls(out1)
+    
+    # Get menu options
     code2, out2, err2 = run_v4l2(["v4l2-ctl", "-d", cam.device, "--list-ctrls-menus"])
     if code2 == 0:
         menus = parse_ctrl_menus(out2)
+        log(f"Found {len(menus)} controls with menus")
+        # Merge menu data into controls
         for ctrl in controls:
-            if ctrl["name"] in menus:
-                ctrl["menu"] = menus[ctrl["name"]]
+            ctrl_name = ctrl["name"]
+            if ctrl_name in menus and menus[ctrl_name]:
+                ctrl["menu"] = menus[ctrl_name]
                 ctrl["type"] = "menu"
+                log(f"  {ctrl_name}: {len(menus[ctrl_name])} menu items")
+    else:
+        log(f"Failed to get menus: code={code2}, err={err2}")
+    
     controls = sort_controls(controls)
     return jsonify({"controls": controls})
 
@@ -926,6 +1011,36 @@ def api_info():
     if code1 != 0:
         return jsonify({"error": err1 or out1 or "Failed to fetch device info"}), 500
     return jsonify({"info": out1})
+
+
+@APP.route("/api/v4l2/debug")
+def api_debug():
+    """Debug endpoint to see raw v4l2-ctl output"""
+    cams = APP.config["cams"]
+    cam_index = request.args.get("cam")
+    cam, error, code = get_cam_or_400(cam_index, cams)
+    if error:
+        return error, code
+    
+    code1, out1, err1 = run_v4l2(["v4l2-ctl", "-d", cam.device, "--list-ctrls"])
+    code2, out2, err2 = run_v4l2(["v4l2-ctl", "-d", cam.device, "--list-ctrls-menus"])
+    
+    menus = parse_ctrl_menus(out2) if code2 == 0 else {}
+    
+    return jsonify({
+        "device": cam.device,
+        "list_ctrls": {
+            "code": code1,
+            "stdout": out1,
+            "stderr": err1
+        },
+        "list_ctrls_menus": {
+            "code": code2,
+            "stdout": out2,
+            "stderr": err2
+        },
+        "parsed_menus": menus
+    })
 
 
 def normalize_prefix(prefix: str) -> str:
