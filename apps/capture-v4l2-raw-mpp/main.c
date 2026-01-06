@@ -102,6 +102,7 @@ static void print_usage(const char *prog)
     printf("  --mjpeg-sock <path>     MJPEG stream output socket path (optional)\n");
     printf("  --h264-sock <path>      H264 stream output socket path (optional)\n");
     printf("  --h264-bitrate <kbps>   H264 bitrate in kbps (default: 2000)\n");
+    printf("  --raw-frame-sock <path> Raw frame output socket path (optional)\n");
     printf("  --fps <fps>             Frames per second (default: 30)\n");
     printf("  --num-planes <n>        Number of capture planes (default: 1)\n");
     printf("  --idle <ms>             Idle sleep in ms when no readers (default: 1000)\n");
@@ -119,6 +120,7 @@ int main(int argc, char *argv[])
     const char *jpeg_snapshot = NULL;
     const char *mjpeg_stream = NULL;
     const char *h264_stream = NULL;
+    const char *raw_frame = NULL;
     int width = 1920;
     int height = 1080;
     int quality = 80;
@@ -135,10 +137,11 @@ int main(int argc, char *argv[])
         OPT_FORMAT,
         OPT_OUTPUT,
         OPT_QUALITY,
-        OPT_SNAPSHOT,
-        OPT_MJPEG,
-        OPT_H264,
+        OPT_JPEG_SOCK,
+        OPT_MJPEG_SOCK,
+        OPT_H264_SOCK,
         OPT_BITRATE,
+        OPT_RAW_FRAME_SOCK,
         OPT_FPS,
         OPT_NUM_PLANES,
         OPT_IDLE,
@@ -147,21 +150,22 @@ int main(int argc, char *argv[])
     };
 
     static struct option long_options[] = {
-        {"device",        required_argument, 0, OPT_DEVICE},
-        {"width",         required_argument, 0, OPT_WIDTH},
-        {"height",        required_argument, 0, OPT_HEIGHT},
-        {"format",        required_argument, 0, OPT_FORMAT},
-        {"output",        required_argument, 0, OPT_OUTPUT},
-        {"jpeg-quality",  required_argument, 0, OPT_QUALITY},
-        {"jpeg-sock",     required_argument, 0, OPT_SNAPSHOT},
-        {"mjpeg-sock",    required_argument, 0, OPT_MJPEG},
-        {"h264-sock",     required_argument, 0, OPT_H264},
-        {"h264-bitrate",  required_argument, 0, OPT_BITRATE},
-        {"fps",           required_argument, 0, OPT_FPS},
-        {"num-planes",    required_argument, 0, OPT_NUM_PLANES},
-        {"idle",          required_argument, 0, OPT_IDLE},
-        {"debug",         no_argument,       0, OPT_DEBUG},
-        {"help",          no_argument,       0, OPT_HELP},
+        {"device",         required_argument, 0, OPT_DEVICE},
+        {"width",          required_argument, 0, OPT_WIDTH},
+        {"height",         required_argument, 0, OPT_HEIGHT},
+        {"format",         required_argument, 0, OPT_FORMAT},
+        {"output",         required_argument, 0, OPT_OUTPUT},
+        {"jpeg-quality",   required_argument, 0, OPT_QUALITY},
+        {"jpeg-sock",      required_argument, 0, OPT_JPEG_SOCK},
+        {"mjpeg-sock",     required_argument, 0, OPT_MJPEG_SOCK},
+        {"h264-sock",      required_argument, 0, OPT_H264_SOCK},
+        {"h264-bitrate",   required_argument, 0, OPT_BITRATE},
+        {"raw-frame-sock", required_argument, 0, OPT_RAW_FRAME_SOCK},
+        {"fps",            required_argument, 0, OPT_FPS},
+        {"num-planes",     required_argument, 0, OPT_NUM_PLANES},
+        {"idle",           required_argument, 0, OPT_IDLE},
+        {"debug",          no_argument,       0, OPT_DEBUG},
+        {"help",           no_argument,       0, OPT_HELP},
         {0, 0, 0, 0}
     };
 
@@ -182,20 +186,23 @@ int main(int argc, char *argv[])
         case OPT_OUTPUT:
             jpeg_output = optarg;
             break;
-        case OPT_SNAPSHOT:
+        case OPT_JPEG_SOCK:
             jpeg_snapshot = optarg;
             break;
         case OPT_QUALITY:
             quality = atoi(optarg);
             break;
-        case OPT_MJPEG:
+        case OPT_MJPEG_SOCK:
             mjpeg_stream = optarg;
             break;
-        case OPT_H264:
+        case OPT_H264_SOCK:
             h264_stream = optarg;
             break;
         case OPT_BITRATE:
             bitrate = atoi(optarg);
+            break;
+        case OPT_RAW_FRAME_SOCK:
+            raw_frame = optarg;
             break;
         case OPT_FPS:
             fps = atoi(optarg);
@@ -225,6 +232,7 @@ int main(int argc, char *argv[])
     sock_ctx_t jpeg_sock = {0};
     sock_ctx_t mjpeg_sock = {0};
     sock_ctx_t h264_sock = {0};
+    sock_ctx_t raw_frame_sock = {0};
 
     log_printf("Device: %s\n", device);
     log_printf("Resolution: %dx%d\n", width, height);
@@ -233,6 +241,7 @@ int main(int argc, char *argv[])
     if (jpeg_snapshot) log_printf("JPEG snapshot socket: %s\n", jpeg_snapshot);
     if (mjpeg_stream) log_printf("MJPEG stream socket: %s\n", mjpeg_stream);
     if (h264_stream) log_printf("H264 stream socket: %s\n", h264_stream);
+    if (raw_frame) log_printf("Raw frame socket: %s\n", raw_frame);
     log_printf("FPS: %d\n", fps);
 
     signal(SIGINT, signal_handler);
@@ -270,6 +279,11 @@ int main(int argc, char *argv[])
             log_errorf( "Failed to open H264 socket\n");
             goto error;
         }
+    }
+
+    if (raw_frame && sock_open(&raw_frame_sock, raw_frame) < 0) {
+        log_errorf( "Failed to open raw socket\n");
+        goto error;
     }
 
     if (v4l2_capture_start(&v4l2) < 0) {
@@ -313,6 +327,7 @@ int main(int argc, char *argv[])
         sock_accept_clients(&jpeg_sock);
         sock_accept_clients(&mjpeg_sock);
         sock_accept_clients(&h264_sock);
+        sock_accept_clients(&raw_frame_sock);
 
         callback_chain_t jpeg_chain[] = {
             { write_output_rename_cb, (void*)jpeg_output, jpeg_output != NULL },
@@ -348,6 +363,11 @@ int main(int argc, char *argv[])
             encoded_any = 1;
         }
 
+        if (raw_frame_sock.num_clients > 0) {
+            sock_write_cb(frame_data, bytesused, &raw_frame_sock);
+            encoded_any = 1;
+        }
+
         v4l2_capture_release_frame(&v4l2, &buf);
 
         struct timespec now;
@@ -376,12 +396,13 @@ int main(int argc, char *argv[])
         last_frame = now;
 
         if (!encoded_any && idle_ms > 0) {
-            sock_ctx_t *socks[] = { &jpeg_sock, &mjpeg_sock, &h264_sock, NULL };
+            sock_ctx_t *socks[] = { &jpeg_sock, &mjpeg_sock, &h264_sock, &raw_frame_sock, NULL };
             sock_wait_fds(socks, idle_ms);
         }
     }
 
     v4l2_capture_stop(&v4l2);
+    sock_close(&raw_frame_sock);
     sock_close(&h264_sock);
     sock_close(&mjpeg_sock);
     sock_close(&jpeg_sock);
@@ -397,6 +418,7 @@ error_stop:
     v4l2_capture_stop(&v4l2);
 
 error:
+    sock_close(&raw_frame_sock);
     sock_close(&h264_sock);
     sock_close(&mjpeg_sock);
     sock_close(&jpeg_sock);
