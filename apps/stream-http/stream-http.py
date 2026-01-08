@@ -11,7 +11,8 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 ALLOWED_PATHS = {
     '/': 'index.html',
     '/player': 'player.html',
-    '/webrtc': 'webrtc.html'
+    '/webrtc': 'webrtc.html',
+    '/control': 'control.html'
 }
 
 def log(msg):
@@ -124,36 +125,6 @@ class CameraHandler(SimpleHTTPRequestHandler):
 
     def handle_control(self):
         try:
-            parsed = urlparse(self.path)
-            path = parsed.path
-            
-            # Strip /control prefix for the Flask app
-            if path.startswith('/control'):
-                path = path[8:]  # len('/control') = 8
-            if not path:
-                path = '/'
-            
-            query = {}
-            if parsed.query:
-                from urllib.parse import parse_qs
-                query_dict = parse_qs(parsed.query)
-                query = {k: v[0] for k, v in query_dict.items()}
-            
-            request_data = {
-                "method": self.command,
-                "path": path,
-                "query": query
-            }
-            
-            if self.command == "POST":
-                content_length = int(self.headers.get('Content-Length', 0))
-                if content_length > 0:
-                    request_body = self.rfile.read(content_length).decode()
-                    try:
-                        request_data["body"] = json.loads(request_body)
-                    except:
-                        request_data["body"] = request_body
-            
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             sock.settimeout(5.0)
             try:
@@ -169,33 +140,17 @@ class CameraHandler(SimpleHTTPRequestHandler):
                     if b'\n' in response:
                         break
                 result = json.loads(response.decode().strip())
-                log(f"Control socket response: status={result.get('status')}, body_len={len(str(result.get('body', '')))}")
-                
-                status = result.get("status", 200)
-                headers = result.get("headers", {})
-                body = result.get("body", "")
-                
-                # Convert body to bytes
-                if isinstance(body, dict) or isinstance(body, list):
-                    body_bytes = json.dumps(body).encode()
-                    if 'Content-Type' not in headers:
-                        headers['Content-Type'] = 'application/json'
-                elif isinstance(body, str):
-                    body_bytes = body.encode()
-                else:
-                    body_bytes = body
-                
-                # Send response
-                self.send_response(status)
-                headers['Content-Length'] = str(len(body_bytes))
-                for key, value in headers.items():
-                    self.send_header(key, value)
-                self.end_headers()
-                self.wfile.write(body_bytes)
+                body_bytes = json.dumps(result).encode()
             finally:
                 sock.close()
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body_bytes)))
+            self.end_headers()
+            self.wfile.write(body_bytes)
         except Exception as e:
-            log(f"Control request error: {e}")
+            log(f"Control RPC error: {e}")
             self.send_error(500, f'Internal error: {e}')
 
     def handle_snapshot(self):

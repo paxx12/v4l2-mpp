@@ -1,131 +1,73 @@
 # v4l2-ctrls
 
-Touch-friendly web UI for managing V4L2 camera controls with embedded video preview.
+Standalone JSON-RPC service for managing V4L2 camera controls.
 
 ## Features
 
-- Real-time V4L2 control adjustment via web interface
-- Automatic detection and handling of read-only controls
-- Multi-camera support with embedded video streams
-- Modern, colorful UI optimized for touch devices with light/dark theme support
-- Reverse proxy compatible with flexible URL configuration
-- LocalStorage persistence for user preferences (theme, camera selection, preview mode)
+- JSON-RPC 2.0 control API (`list`, `get`, `set`, `info`)
+- Single-device focus with explicit `--device`
+- Control settings persistence and automatic restore on startup
+- Menu-aware control metadata
 
 ## Requirements
 
 - Python 3
-- Flask (`pip install flask`)
 - `v4l2-ctl` available in `PATH`
 
 ## Usage
 
-**Single camera (auto-detect):**
 ```sh
-python3 v4l2-ctrls.py
+python3 v4l2-ctrls.py --device /dev/video11 --socket /tmp/v4l2-ctrls.sock
 ```
 
-**Specify devices:**
-```sh
-python3 v4l2-ctrls.py --device /dev/video11
-```
-
-**Multiple cameras with custom configuration:**
+**Optional state file:**
 ```sh
 python3 v4l2-ctrls.py \
   --device /dev/video11 \
-  --device /dev/video12 \
-  --port 5001 \
-  --camera-url http://192.168.1.100/ \
-  --app-base-url /camera-controls/ \
-  --title "My Camera System"
-```
-
-**Custom stream endpoints:**
-```sh
-python3 v4l2-ctrls.py \
-  --device /dev/video12 \
-  --stream-prefix /dev/video12=/webcam2/ \
-  --stream-path-webrtc "{prefix}webrtc" \
-  --stream-path-mjpg "{prefix}stream.mjpg" \
-  --stream-path-snapshot "{prefix}snapshot.jpg"
-```
-
-**Non-standard stream backend:**
-```sh
-python3 v4l2-ctrls.py \
-  --device /dev/video0 \
-  --stream-prefix /dev/video0=/camera/ \
-  --stream-path-webrtc "{prefix}live.webrtc" \
-  --stream-path-mjpg "{prefix}feed.mjpeg" \
-  --stream-path-snapshot "{prefix}snap.png"
+  --socket /tmp/v4l2-ctrls.sock \
+  --state-file /var/lib/v4l2-ctrls/video11.json
 ```
 
 ## Command-line Options
 
-- `--device <path>` - V4L2 device path (can be specified multiple times; auto-detects if omitted)
-- `--host <address>` - Host to bind (default: `0.0.0.0`)
-- `--port <number>` - Port to bind (default: `5000`)
-- `--camera-url <url>` - Base URL for camera streams (default: `http://127.0.0.1/`)
-- `--app-base-url <path>` - Base URL path for UI routing when behind a reverse proxy (optional)
-- `--title <text>` - Custom page title (optional)
-- `--stream-prefix <key=path>` - Override stream prefix per camera (key can be device path, basename, or cam id)
-- `--stream-path-webrtc <template>` - Template for WebRTC stream path (default: `{prefix}webrtc`)
-- `--stream-path-mjpg <template>` - Template for MJPG stream path (default: `{prefix}stream.mjpg`)
-- `--stream-path-snapshot <template>` - Template for snapshot stream path (default: `{prefix}snapshot.jpg`)
+- `--device <path>` - V4L2 device path (required)
+- `--socket <path>` - Unix socket path to expose JSON-RPC (required)
+- `--state-file <path>` - Optional path to persist control state
 
-## URL Template Variables
+## JSON-RPC API
 
-The `--camera-url` option supports template variables for flexible stream routing:
+All requests are line-delimited JSON objects over the Unix socket and follow JSON-RPC 2.0.
 
-- `{path}` - Full path including camera prefix and mode (e.g., `/webcam/stream.mjpg`)
-- `{prefix}` - Camera prefix only (e.g., `/webcam/`)
-- `{mode}` - Preview mode (e.g., `webrtc`, `mjpg`, `snapshot`)
-- `{cam}` - Camera id (e.g., `video12`)
-- `{device}` - Device path (e.g., `/dev/video12`)
-- `{index}` - Camera index in the list (1-based)
-- `{basename}` - Device basename (e.g., `video12`)
-
-**Examples:**
-```sh
-# Simple append mode (default behavior)
---camera-url http://192.168.1.100/
-
-# Path substitution
---camera-url http://192.168.1.100/streams/{path}
-
-# Custom routing with prefix and mode
---camera-url http://192.168.1.100/{prefix}{mode}
+### list
+Returns all controls and metadata, including current values.
+```json
+{"jsonrpc":"2.0","id":1,"method":"list"}
 ```
 
-## Stream Path Templates
-
-The stream path options (`--stream-path-webrtc`, `--stream-path-mjpg`, `--stream-path-snapshot`) support the same
-template variables as above, plus `{basename}` for the device basename (e.g., `video12`).
-
-## API Endpoints
-
-- `GET /` - Main UI page
-- `GET /api/cams` - List cameras and streamer configuration
-- `GET /api/v4l2/ctrls?cam=<cam_id>` - Get available controls for device
-- `POST /api/v4l2/set?cam=<cam_id>` - Apply control value changes (JSON body: `{"control_name": value}`)
-- `GET /api/v4l2/info?cam=<cam_id>` - Get device information
-
-## Reverse Proxy Configuration
-
-When running behind a reverse proxy (e.g., nginx), use `--app-base-url` to set the base path:
-```sh
-python3 v4l2-ctrls.py --app-base-url /v4l2/
+### get
+Returns current values for a subset of controls.
+```json
+{"jsonrpc":"2.0","id":2,"method":"get","params":{"controls":["brightness","contrast"]}}
 ```
 
-Then configure your proxy to forward `/v4l2/` to the Flask app.
+### set
+Applies control updates and persists them.
+```json
+{"jsonrpc":"2.0","id":3,"method":"set","params":{"controls":{"brightness":128,"contrast":32}}}
+```
+
+### info
+Returns device information from `v4l2-ctl -D`.
+```json
+{"jsonrpc":"2.0","id":4,"method":"info"}
+```
 
 ## Integration
 
-Integrated into the v4l2-mpp firmware build system. Installed to `/usr/local/bin/v4l2-ctrls.py` during firmware compilation.
+Pair `v4l2-ctrls` with `stream-http` by passing `--control-sock` to the HTTP server. The UI is served by `stream-http` under `/control/`.
 
 ## Notes
 
-- Control changes are applied immediately but **not persisted** across reboots
-- Persistence is handled by the camera streamer/service layer
-- Camera auto-detection prefers `/dev/v4l-subdev2` if available
-- Up to 8 devices are auto-detected by default
+- Persisted controls are restored on startup after validating against the current device controls.
+- The default persistence location is `$XDG_STATE_HOME/v4l2-ctrls/<device>.json` (or `~/.local/state/v4l2-ctrls/` if unset).
+- Auto/manual mode controls (exposure/focus/white-balance) are applied before dependent controls to avoid precedence issues.
