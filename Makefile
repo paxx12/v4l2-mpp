@@ -1,4 +1,4 @@
-APPS = stream-http fake-service detect-rknn-yolo11
+APPS = stream-http detect-http fake-service detect-rknn-yolo11
 APPS_DIR = apps
 
 ifneq (x,x$(wildcard deps/mpp/usr-local/lib/librockchip_mpp.a))
