@@ -1,6 +1,7 @@
 #!/bin/bash
 
 DIR=$(dirname "$0")
+BINDIR="$DIR/usr/local/bin"
 
 if [[ ! -d /tmp/v4l2-venv ]]; then
     python3 -m venv /tmp/v4l2-venv
@@ -18,7 +19,7 @@ cd "$DIR"
 
 set -x
 
-/tmp/v4l2-venv/bin/python3 /tmp/v4l2/detect-rknn-yolo11.py \
+/tmp/v4l2-venv/bin/python3 "$BINDIR/detect-rknn-yolo11.py" \
     --image /tmp/.monitor.jpg \
     --output-image /home/lava/dirty_output.jpg \
     --model-path /home/lava/printer_data/model/printer_detector.0930.fp.rknn \

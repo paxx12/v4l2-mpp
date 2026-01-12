@@ -1,6 +1,8 @@
 #!/bin/bash
 
 DIR=$(dirname "$0")
+BINDIR="$DIR/usr/local/bin"
+HTMLDIR="$DIR/usr/share/stream-http/html"
 
 cleanup() {
     kill $PIDS 2>/dev/null
@@ -15,19 +17,20 @@ if id -u lava &> /dev/null; then
     RUNCMD="su lava"
 fi
 
-"$DIR/capture-v4l2-jpeg-mpp" \
+"$BINDIR/capture-v4l2-jpeg-mpp" \
     --device /dev/video18 \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
     --mjpeg-sock /tmp/capture-usb-mjpeg.sock \
     --h264-sock /tmp/capture-usb-h264.sock &
 PIDS="$!"
 
-$RUNCMD -c "$DIR/stream-webrtc \
+$RUNCMD -c "$BINDIR/stream-webrtc \
     --h264-sock /tmp/capture-usb-h264.sock \
     --webrtc-sock /tmp/capture-usb-webrtc.sock" &
 PIDS="$PIDS $!"
 
-$RUNCMD -c "$DIR/stream-http.py \
+$RUNCMD -c "$BINDIR/stream-http.py \
+    --html-dir $HTMLDIR \
     --port 8081 \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
     --mjpeg-sock /tmp/capture-usb-mjpeg.sock \
@@ -35,7 +38,7 @@ $RUNCMD -c "$DIR/stream-http.py \
     --webrtc-sock /tmp/capture-usb-webrtc.sock" &
 PIDS="$PIDS $!"
 
-$RUNCMD -c "$DIR/stream-rtsp \
+$RUNCMD -c "$BINDIR/stream-rtsp \
     --h264-sock /tmp/capture-usb-h264.sock \
     --rtsp-port 8555" &
 PIDS="$PIDS $!"
