@@ -39,11 +39,9 @@ AUTO_FIRST_CONTROLS = {
     "focus_automatic_continuous",
 }
 
-
 def log(msg: str) -> None:
     ts = time.strftime("%H:%M:%S")
     print(f"[{ts}] {msg}", flush=True)
-
 
 def run_v4l2(args: List[str], timeout: float = 3.0) -> Tuple[int, str, str]:
     try:
@@ -59,7 +57,6 @@ def run_v4l2(args: List[str], timeout: float = 3.0) -> Tuple[int, str, str]:
     except subprocess.TimeoutExpired as exc:
         return 124, "", f"Timeout running {' '.join(args)}: {exc}"
 
-
 def normalize_type(ctrl_type: Optional[str]) -> str:
     if not ctrl_type:
         return "unknown"
@@ -71,7 +68,6 @@ def normalize_type(ctrl_type: Optional[str]) -> str:
         return "menu"
     return ctrl_type
 
-
 def get_int_from_parts(parts: List[str], field: str) -> Optional[int]:
     token = next((p for p in parts if p.startswith(f"{field}=")), None)
     if not token:
@@ -80,7 +76,6 @@ def get_int_from_parts(parts: List[str], field: str) -> Optional[int]:
         return int(token.split("=", 1)[1])
     except ValueError:
         return None
-
 
 def parse_ctrls(output: str) -> List[Dict]:
     controls = []
@@ -114,7 +109,6 @@ def parse_ctrls(output: str) -> List[Dict]:
         )
     return controls
 
-
 def parse_ctrl_menus(output: str) -> Dict[str, List[Dict[str, str]]]:
     """Parse v4l2-ctl --list-ctrls-menus output."""
     menus: Dict[str, List[Dict[str, str]]] = {}
@@ -146,7 +140,6 @@ def parse_ctrl_menus(output: str) -> Dict[str, List[Dict[str, str]]]:
 
     return menus
 
-
 def sort_controls(controls: List[Dict]) -> List[Dict]:
     order_map = {name: idx for idx, name in enumerate(CONTROL_ORDER)}
     indexed = list(enumerate(controls))
@@ -157,7 +150,6 @@ def sort_controls(controls: List[Dict]) -> List[Dict]:
         return (idx, original_idx)
 
     return [ctrl for _, ctrl in sorted(indexed, key=sort_key)]
-
 
 def fetch_controls(device: str) -> List[Dict]:
     code1, out1, err1 = run_v4l2(["v4l2-ctl", "-d", device, "--list-ctrls"])
@@ -177,7 +169,6 @@ def fetch_controls(device: str) -> List[Dict]:
         log(f"Failed to get menus: code={code2}, err={err2}")
 
     return sort_controls(controls)
-
 
 def validate_values(values: Dict[str, int], controls: List[Dict]) -> Dict[str, int]:
     allowlist = {ctrl["name"] for ctrl in controls}
@@ -202,7 +193,6 @@ def validate_values(values: Dict[str, int], controls: List[Dict]) -> Dict[str, i
 
     return validated
 
-
 def apply_controls(device: str, values: Dict[str, int]) -> Tuple[bool, str, str, int]:
     if not values:
         return True, "", "", 0
@@ -211,19 +201,16 @@ def apply_controls(device: str, values: Dict[str, int]) -> Tuple[bool, str, str,
     code, out, err = run_v4l2(cmd)
     return code == 0, out, err, code
 
-
 def split_controls_by_precedence(values: Dict[str, int]) -> Tuple[Dict[str, int], Dict[str, int]]:
     auto_first = {key: value for key, value in values.items() if key in AUTO_FIRST_CONTROLS}
     remaining = {key: value for key, value in values.items() if key not in AUTO_FIRST_CONTROLS}
     return auto_first, remaining
-
 
 def read_device_info(device: str) -> str:
     code, out, err = run_v4l2(["v4l2-ctl", "-d", device, "-D"])
     if code != 0:
         raise RuntimeError(err or out or "Failed to fetch device info")
     return out
-
 
 def load_state(path: Path) -> Dict[str, int]:
     if not path.exists():
@@ -236,12 +223,10 @@ def load_state(path: Path) -> Dict[str, int]:
         log(f"Failed to load state from {path}: {exc}")
     return {}
 
-
 def save_state(path: Path, values: Dict[str, int]) -> None:
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(values, indent=2, sort_keys=True))
     os.replace(tmp_path, path)
-
 
 def restore_state(device: str, path: Path) -> None:
     saved = load_state(path)
@@ -268,13 +253,59 @@ def restore_state(device: str, path: Path) -> None:
     else:
         log(f"Failed to restore controls: code={code}, err={err or out}")
 
-
 class JsonRpcError(Exception):
     def __init__(self, code: int, message: str):
         super().__init__(message)
         self.code = code
         self.message = message
 
+def handle_list_method(device: str, state_path: Optional[Path], params: Dict) -> Dict:
+    controls = fetch_controls(device)
+    return {"controls": controls}
+
+def handle_get_method(device: str, state_path: Optional[Path], params: Dict) -> Dict:
+    controls = fetch_controls(device)
+    names = params.get("controls")
+    if names is None:
+        names = [ctrl["name"] for ctrl in controls]
+    if not isinstance(names, list):
+        raise JsonRpcError(-32602, "controls must be a list")
+    values = {ctrl["name"]: ctrl.get("value") for ctrl in controls if ctrl["name"] in names}
+    missing = [name for name in names if name not in values]
+    if missing:
+        raise JsonRpcError(-32602, f"Unknown controls: {', '.join(missing)}")
+    return {"values": values}
+
+def handle_set_method(device: str, state_path: Optional[Path], params: Dict) -> Dict:
+    if not isinstance(params, dict) or "controls" not in params:
+        raise JsonRpcError(-32602, "params.controls is required")
+    if not isinstance(params["controls"], dict):
+        raise JsonRpcError(-32602, "params.controls must be an object")
+    controls = fetch_controls(device)
+    validated = validate_values(params["controls"], controls)
+    auto_first, remaining = split_controls_by_precedence(validated)
+    ok, out, err, code = apply_controls(device, auto_first)
+    if not ok:
+        raise JsonRpcError(-32000, err or out or f"Failed to set auto controls (code {code})")
+    ok, out, err, code = apply_controls(device, remaining)
+    if not ok:
+        raise JsonRpcError(-32000, err or out or f"Failed to set controls (code {code})")
+    if state_path is not None:
+        persisted = load_state(state_path)
+        persisted.update(validated)
+        save_state(state_path, persisted)
+    return {"applied": validated, "stdout": out}
+
+def handle_info_method(device: str, state_path: Optional[Path], params: Dict) -> Dict:
+    info = read_device_info(device)
+    return {"info": info}
+
+METHOD_HANDLERS = {
+    "list": handle_list_method,
+    "get": handle_get_method,
+    "set": handle_set_method,
+    "info": handle_info_method,
+}
 
 def handle_rpc(device: str, state_path: Optional[Path], request: Dict) -> Optional[Dict]:
     if request.get("jsonrpc") != "2.0":
@@ -284,51 +315,47 @@ def handle_rpc(device: str, state_path: Optional[Path], request: Dict) -> Option
     params = request.get("params") or {}
     if not method:
         raise JsonRpcError(-32600, "Missing method")
-
-    if method == "list":
-        controls = fetch_controls(device)
-        result = {"controls": controls}
-    elif method == "get":
-        controls = fetch_controls(device)
-        names = params.get("controls")
-        if names is None:
-            names = [ctrl["name"] for ctrl in controls]
-        if not isinstance(names, list):
-            raise JsonRpcError(-32602, "controls must be a list")
-        values = {ctrl["name"]: ctrl.get("value") for ctrl in controls if ctrl["name"] in names}
-        missing = [name for name in names if name not in values]
-        if missing:
-            raise JsonRpcError(-32602, f"Unknown controls: {', '.join(missing)}")
-        result = {"values": values}
-    elif method == "set":
-        if not isinstance(params, dict) or "controls" not in params:
-            raise JsonRpcError(-32602, "params.controls is required")
-        if not isinstance(params["controls"], dict):
-            raise JsonRpcError(-32602, "params.controls must be an object")
-        controls = fetch_controls(device)
-        validated = validate_values(params["controls"], controls)
-        auto_first, remaining = split_controls_by_precedence(validated)
-        ok, out, err, code = apply_controls(device, auto_first)
-        if not ok:
-            raise JsonRpcError(-32000, err or out or f"Failed to set auto controls (code {code})")
-        ok, out, err, code = apply_controls(device, remaining)
-        if not ok:
-            raise JsonRpcError(-32000, err or out or f"Failed to set controls (code {code})")
-        if state_path is not None:
-            persisted = load_state(state_path)
-            persisted.update(validated)
-            save_state(state_path, persisted)
-        result = {"applied": validated, "stdout": out}
-    elif method == "info":
-        info = read_device_info(device)
-        result = {"info": info}
-    else:
+    handler = METHOD_HANDLERS.get(method)
+    if not handler:
         raise JsonRpcError(-32601, f"Unknown method: {method}")
-
+    result = handler(device, state_path, params)
     if request_id is None:
         return None
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
+def handle_client_connection(conn: socket.socket, device: str, state_path: Optional[Path]) -> None:
+    try:
+        data = b""
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+            if b"\n" in data:
+                break
+
+        if data:
+            request = json.loads(data.decode().strip())
+            try:
+                response = handle_rpc(device, state_path, request)
+            except JsonRpcError as exc:
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "error": {"code": exc.code, "message": exc.message},
+                }
+            except Exception as exc:
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "error": {"code": -32000, "message": str(exc)},
+                }
+            if response is not None:
+                conn.sendall((json.dumps(response) + "\n").encode())
+    except Exception as exc:
+        log(f"Socket request error: {exc}")
+    finally:
+        conn.close()
 
 def serve_socket(device: str, socket_path: str, state_path: Optional[Path]) -> None:
     if os.path.exists(socket_path):
@@ -344,43 +371,11 @@ def serve_socket(device: str, socket_path: str, state_path: Optional[Path]) -> N
     try:
         while True:
             conn, _ = sock.accept()
-            try:
-                data = b""
-                while True:
-                    chunk = conn.recv(4096)
-                    if not chunk:
-                        break
-                    data += chunk
-                    if b"\n" in data:
-                        break
-
-                if data:
-                    request = json.loads(data.decode().strip())
-                    try:
-                        response = handle_rpc(device, state_path, request)
-                    except JsonRpcError as exc:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {"code": exc.code, "message": exc.message},
-                        }
-                    except Exception as exc:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {"code": -32000, "message": str(exc)},
-                        }
-                    if response is not None:
-                        conn.sendall((json.dumps(response) + "\n").encode())
-            except Exception as exc:
-                log(f"Socket request error: {exc}")
-            finally:
-                conn.close()
+            handle_client_connection(conn, device, state_path)
     finally:
         sock.close()
         if os.path.exists(socket_path):
             os.unlink(socket_path)
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="V4L2 control JSON-RPC service")
@@ -402,7 +397,6 @@ def main() -> None:
         log("No state file specified, controls will not be persisted")
 
     serve_socket(args.device, args.socket, state_path)
-
 
 if __name__ == "__main__":
     main()
