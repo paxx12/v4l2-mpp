@@ -1,5 +1,5 @@
 TARGET = detect-http.py
-SRC = main.py
+SRC = detect-http.py
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin

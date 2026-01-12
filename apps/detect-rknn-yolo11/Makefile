@@ -1,5 +1,5 @@
 TARGET = detect-rknn-yolo11.py
-SRC = main.py
+SRC = detect-rknn-yolo11.py
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin

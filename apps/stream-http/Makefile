@@ -1,19 +1,16 @@
 TARGET = stream-http.py
-SRC = main.py
+SRC = stream-http.py
 HTML_FILES = html/index.html html/player.html html/webrtc.html
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 HTMLDIR = /usr/share/stream-http/html
 
-all: $(TARGET)
+all:
+	@echo "Nothing to build for $(TARGET)"
 
 clean:
-	rm -f $(TARGET)
-
-$(TARGET): main.py
-	cp main.py $(TARGET)
-	chmod +x $(TARGET)
+	@echo "Nothing to clean for $(TARGET)"
 
 install: $(TARGET)
 	install -d $(DESTDIR)$(BINDIR)
