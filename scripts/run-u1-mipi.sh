@@ -25,6 +25,12 @@ fi
     --h264-sock /tmp/capture-mipi-h264.sock &
 PIDS="$!"
 
+$BINDIR/control-v4l2.py \
+    --device /dev/video11 \
+    --sock /tmp/control-mipi.sock \
+    --state-file /tmp/control-mipi.json &
+PIDS="$PIDS $!"
+
 $RUNCMD -c "$BINDIR/stream-webrtc \
     --h264-sock /tmp/capture-mipi-h264.sock \
     --webrtc-sock /tmp/capture-mipi-webrtc.sock" &
@@ -35,7 +41,8 @@ $RUNCMD -c "$BINDIR/stream-http.py \
     --jpeg-sock /tmp/capture-mipi-jpeg.sock \
     --mjpeg-sock /tmp/capture-mipi-mjpeg.sock \
     --h264-sock /tmp/capture-mipi-h264.sock \
-    --webrtc-sock /tmp/capture-mipi-webrtc.sock" &
+    --webrtc-sock /tmp/capture-mipi-webrtc.sock \
+    --control-sock /tmp/control-mipi.sock" &
 PIDS="$PIDS $!"
 
 $RUNCMD -c "$BINDIR/stream-rtsp \

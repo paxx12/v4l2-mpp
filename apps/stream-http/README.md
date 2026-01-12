@@ -10,5 +10,5 @@ Connects to capture app Unix sockets and serves video streams over HTTP. Provide
 - `/stream.mjpg` - MJPEG stream
 - `/stream.h264` - Raw H264 stream
 - `/player` - Browser H264 player (jmuxer)
-- `/control/` - Camera control UI (requires `--control-sock`)
-- `POST /control/rpc` - JSON-RPC proxy to the control socket
+- `/webrtc` - Camera control UI (requires `--webrtc-sock`)
+- `/control` - Camera control UI (requires `--control-sock`)

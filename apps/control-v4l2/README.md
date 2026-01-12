@@ -17,21 +17,21 @@ Standalone JSON-RPC service for managing V4L2 camera controls.
 ## Usage
 
 ```sh
-python3 control-v4l2.py --device /dev/video11 --socket /tmp/control-v4l2.sock
+python3 control-v4l2.py --device /dev/video11 --sock /tmp/control-v4l2.sock
 ```
 
 **Optional state file:**
 ```sh
 python3 control-v4l2.py \
   --device /dev/video11 \
-  --socket /tmp/control-v4l2.sock \
+  --sock /tmp/control-v4l2.sock \
   --state-file /var/lib/control-v4l2/video11.json
 ```
 
 ## Command-line Options
 
 - `--device <path>` - V4L2 device path (required)
-- `--socket <path>` - Unix socket path to expose JSON-RPC (required)
+- `--sock <path>` - Unix socket path to expose JSON-RPC (required)
 - `--state-file <path>` - Optional path to persist control state
 
 ## JSON-RPC API

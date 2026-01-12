@@ -1,10 +1,10 @@
-HTML_CONTROL = """<!doctype html>
-<html lang=\"en\">
+<!doctype html>
+<html lang="en">
 <head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>V4L2 Controls</title>
-  <base href=\"./\">
+  <base href="./">
   <style>
     :root {
       color-scheme: light dark;
@@ -20,7 +20,7 @@ HTML_CONTROL = """<!doctype html>
       --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
       --gradient: linear-gradient(145deg, rgba(78, 161, 255, 0.12), rgba(0, 0, 0, 0));
     }
-    [data-theme=\"light\"] {
+    [data-theme="light"] {
       color-scheme: light;
       --bg: #f6f7fb;
       --panel: #ffffff;
@@ -80,7 +80,7 @@ HTML_CONTROL = """<!doctype html>
       color: var(--muted);
       margin-bottom: 6px;
     }
-    select, input[type=\"number\"], input[type=\"range\"] {
+    select, input[type="number"], input[type="range"] {
       width: 100%;
       padding: 10px 12px;
       border-radius: 10px;
@@ -95,7 +95,7 @@ HTML_CONTROL = """<!doctype html>
       gap: 8px;
       align-items: center;
     }
-    .row input[type=\"range\"] {
+    .row input[type="range"] {
       flex: 1;
     }
     button {
@@ -168,11 +168,11 @@ HTML_CONTROL = """<!doctype html>
       gap: 10px;
       align-items: center;
     }
-    input[type=\"range\"] {
+    input[type="range"] {
       height: 36px;
       accent-color: var(--accent-strong);
     }
-    .control input[type=\"number\"] {
+    .control input[type="number"] {
       margin-top: 10px;
     }
     .value-pill {
@@ -187,7 +187,7 @@ HTML_CONTROL = """<!doctype html>
       color: var(--text);
     }
     .status {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 12px;
       background: var(--panel-strong);
       padding: 10px;
@@ -218,44 +218,44 @@ HTML_CONTROL = """<!doctype html>
 <body>
   <header>
     <h1>V4L2 Controls</h1>
-    <div style=\"display:flex; gap:8px; align-items:center;\">
-      <label for=\"theme-select\" style=\"margin-bottom:0;\">Theme</label>
-      <select id=\"theme-select\" class=\"theme-select\">
-        <option value=\"system\">System</option>
-        <option value=\"dark\">Dark</option>
-        <option value=\"light\">Light</option>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <label for="theme-select" style="margin-bottom:0;">Theme</label>
+      <select id="theme-select" class="theme-select">
+        <option value="system">System</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
       </select>
     </div>
   </header>
   <main>
-    <section class=\"panel panel--preview\">
+    <section class="panel panel--preview">
       <h2>Preview</h2>
-      <label for=\"preview-mode\">Preview mode</label>
-      <select id=\"preview-mode\">
-        <option value=\"webrtc\">WebRTC</option>
-        <option value=\"mjpg\">MJPG</option>
-        <option value=\"snapshot\">Snapshot</option>
+      <label for="preview-mode">Preview mode</label>
+      <select id="preview-mode">
+        <option value="webrtc">WebRTC</option>
+        <option value="mjpg">MJPG</option>
+        <option value="snapshot">Snapshot</option>
       </select>
-      <div class=\"preview\" id=\"preview\" style=\"margin-top:12px;\"></div>
-      <div class=\"note\">Control settings are persisted by the backend service.</div>
+      <div class="preview" id="preview" style="margin-top:12px;"></div>
+      <div class="note">Control settings are persisted by the backend service.</div>
     </section>
-    <section class=\"panel\">
-      <div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;\">
-        <h2 style=\"margin:0;\">Controls</h2>
-        <label style=\"display:flex; gap:8px; align-items:center; cursor:pointer; margin:0;\">
-          <input type=\"checkbox\" id=\"auto-apply\" style=\"width:auto; cursor:pointer;\" />
-          <span style=\"font-size:14px;\">Auto-apply</span>
+    <section class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2 style="margin:0;">Controls</h2>
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer; margin:0;">
+          <input type="checkbox" id="auto-apply" style="width:auto; cursor:pointer;" />
+          <span style="font-size:14px;">Auto-apply</span>
         </label>
       </div>
-      <div id=\"controls\"></div>
-      <div class=\"action-bar\">
-        <button id=\"apply\">Apply changes</button>
-        <button id=\"reset\" class=\"ghost\">Reset</button>
+      <div id="controls"></div>
+      <div class="action-bar">
+        <button id="apply">Apply changes</button>
+        <button id="reset" class="ghost">Reset</button>
       </div>
     </section>
-    <section class=\"panel\">
+    <section class="panel">
       <h2>Status</h2>
-      <div class=\"status\" id=\"status\">Ready.</div>
+      <div class="status" id="status">Ready.</div>
     </section>
   </main>
   <script>
@@ -456,7 +456,7 @@ HTML_CONTROL = """<!doctype html>
     }
 
     async function rpc(method, params = {}) {
-      const response = await fetch('rpc', {
+      const response = await fetch(window.location.href, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: rpcCounter++, method, params }),
@@ -523,7 +523,7 @@ HTML_CONTROL = """<!doctype html>
     async function applyChanges() {
       const payload = {};
       const previous = controlMap(lastControls);
-      controlsContainer.querySelectorAll('[data-control][data-role=\"value\"]').forEach(el => {
+      controlsContainer.querySelectorAll('[data-control][data-role="value"]').forEach(el => {
         const name = el.dataset.control;
         const parsed = parseInt(el.value, 10);
         if (Number.isNaN(parsed)) {
@@ -597,4 +597,3 @@ HTML_CONTROL = """<!doctype html>
   </script>
 </body>
 </html>
-"""

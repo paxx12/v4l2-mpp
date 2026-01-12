@@ -24,6 +24,12 @@ fi
     --h264-sock /tmp/capture-usb-h264.sock &
 PIDS="$!"
 
+$BINDIR/control-v4l2.py \
+    --device /dev/video18 \
+    --sock /tmp/control-usb.sock \
+    --state-file /tmp/control-usb.json &
+PIDS="$PIDS $!"
+
 $RUNCMD -c "$BINDIR/stream-webrtc \
     --h264-sock /tmp/capture-usb-h264.sock \
     --webrtc-sock /tmp/capture-usb-webrtc.sock" &
@@ -35,7 +41,8 @@ $RUNCMD -c "$BINDIR/stream-http.py \
     --jpeg-sock /tmp/capture-usb-jpeg.sock \
     --mjpeg-sock /tmp/capture-usb-mjpeg.sock \
     --h264-sock /tmp/capture-usb-h264.sock \
-    --webrtc-sock /tmp/capture-usb-webrtc.sock" &
+    --webrtc-sock /tmp/capture-usb-webrtc.sock \
+    --detect-sock /tmp/control-usb.sock" &
 PIDS="$PIDS $!"
 
 $RUNCMD -c "$BINDIR/stream-rtsp \

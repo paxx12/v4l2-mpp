@@ -3,13 +3,12 @@
 Standalone V4L2 controls JSON-RPC service.
 
 Usage example:
-  python3 apps/control-v4l2/control-v4l2.py --device /dev/video11 --socket /tmp/control-v4l2.sock
+  python3 apps/control-v4l2/control-v4l2.py --device /dev/video11 --sock /tmp/control-v4l2.sock
 """
 
 import argparse
 import json
 import os
-import selectors
 import socket
 import subprocess
 import time
@@ -319,6 +318,7 @@ def handle_rpc(device: str, state_path: Optional[Path], request: Dict) -> Option
     if not handler:
         raise JsonRpcError(-32601, f"Unknown method: {method}")
     result = handler(device, state_path, params)
+    print(f"Handling {method} with {params}. Response: {result}.")
     if request_id is None:
         return None
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -380,7 +380,7 @@ def serve_socket(device: str, socket_path: str, state_path: Optional[Path]) -> N
 def main() -> None:
     parser = argparse.ArgumentParser(description="V4L2 control JSON-RPC service")
     parser.add_argument("--device", required=True, help="V4L2 device path")
-    parser.add_argument("--socket", required=True, help="Unix socket path")
+    parser.add_argument("--sock", required=True, help="Unix sock path")
     parser.add_argument("--state-file", help="Optional path to persist control state")
     args = parser.parse_args()
 
@@ -396,7 +396,7 @@ def main() -> None:
     else:
         log("No state file specified, controls will not be persisted")
 
-    serve_socket(args.device, args.socket, state_path)
+    serve_socket(args.device, args.sock, state_path)
 
 if __name__ == "__main__":
     main()

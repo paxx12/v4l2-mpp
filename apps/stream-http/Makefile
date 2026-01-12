@@ -1,6 +1,6 @@
 TARGET = stream-http.py
 SRC = stream-http.py
-HTML_FILES = html/index.html html/player.html html/webrtc.html
+HTML_FILES = html/index.html html/player.html html/webrtc.html html/control.html
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
