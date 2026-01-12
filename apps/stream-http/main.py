@@ -4,12 +4,15 @@ import socket
 import argparse
 import time
 import json
+import os
 from urllib.parse import urlparse
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
-from html_index import HTML_INDEX
-from html_player import HTML_PLAYER
-from html_webrtc import HTML_WEBRTC
+ALLOWED_PATHS = {
+    '/': 'index.html',
+    '/player': 'player.html',
+    '/webrtc': 'webrtc.html'
+}
 
 def log(msg):
     ts = time.strftime('%H:%M:%S')
@@ -66,58 +69,51 @@ def webrtc_request(sock_path, request):
     finally:
         sock.close()
 
-class CameraHandler(BaseHTTPRequestHandler):
+class CameraHandler(SimpleHTTPRequestHandler):
     jpeg_sock = None
     mjpeg_sock = None
     h264_sock = None
     webrtc_sock = None
+    html_dir = None
 
     def log_message(self, format, *args):
         log(f"HTTP {self.address_string()} - {format % args}")
 
+    def translate_path(self, path):
+        parsed_path = urlparse(path).path
+        if parsed_path not in ALLOWED_PATHS:
+            return None
+        return os.path.join(self.html_dir, ALLOWED_PATHS[path])
+
     def do_GET(self):
         log(f"Request: {self.path} from {self.address_string()}")
         path = urlparse(self.path).path
+
         if path == '/snapshot.jpg':
             self.handle_snapshot()
         elif path == '/stream.mjpg':
             self.handle_mjpeg_stream()
         elif path == '/stream.h264':
             self.handle_h264_stream()
-        elif path == '/player':
-            self.handle_player()
-        elif path == '/webrtc':
-            self.handle_webrtc_player()
-        elif path == '/':
-            self.handle_index()
+        elif path == '/webrtc' and not self.webrtc_sock:
+            self.send_error(503, 'WebRTC not available')
+        elif path not in ALLOWED_PATHS:
+            self.send_error(404, "File not found")
         else:
-            self.send_error(404, 'Not Found')
+            SimpleHTTPRequestHandler.do_GET(self)
+
         log(f"Request done: {self.path}")
 
     def do_POST(self):
         log(f"POST: {self.path} from {self.address_string()}")
         path = urlparse(self.path).path
-        if path == '/webrtc':
+        if path == '/webrtc' and not self.webrtc_sock:
+            self.send_error(503, 'WebRTC not available')
+        elif path == '/webrtc':
             self.handle_webrtc_offer()
         else:
             self.send_error(404, 'Not Found')
         log(f"POST done: {self.path}")
-
-    def send_html(self, html):
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html')
-        self.send_header('Content-Length', len(html))
-        self.end_headers()
-        self.wfile.write(html.encode())
-
-    def handle_webrtc_player(self):
-        if not self.webrtc_sock:
-            self.send_error(503, 'WebRTC not available')
-            return
-        self.send_html(HTML_WEBRTC)
-
-    def handle_index(self):
-        self.send_html(HTML_INDEX)
 
     def handle_snapshot(self):
         if not self.jpeg_sock:
@@ -189,9 +185,6 @@ class CameraHandler(BaseHTTPRequestHandler):
         except (IOError, OSError) as e:
             log(f"H264 stream error: {e}")
 
-    def handle_player(self):
-        self.send_html(HTML_PLAYER)
-
     def send_json_response(self, code, body):
         data = json.dumps(body).encode()
         self.send_response(code)
@@ -214,15 +207,26 @@ class CameraHandler(BaseHTTPRequestHandler):
             self.send_json_response(500, {'error': str(e)})
 
 def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    local_html_dir = os.path.join(script_dir, 'html')
+    installed_html_dir = '/usr/share/stream-http/html'
+
+    if os.path.isdir(local_html_dir):
+        default_html_dir = local_html_dir
+    else:
+        default_html_dir = installed_html_dir
+
     parser = argparse.ArgumentParser(description='V4L2-MPP HTTP Server')
     parser.add_argument('-p', '--port', type=int, default=8080, help='HTTP port')
     parser.add_argument('--bind', default='0.0.0.0', help='Bind address')
+    parser.add_argument('--html-dir', default=default_html_dir, help=f'HTML directory for static files (default: {default_html_dir})')
     parser.add_argument('--jpeg-sock', required=True, help='JPEG snapshot socket')
     parser.add_argument('--mjpeg-sock', required=True, help='MJPEG stream socket')
     parser.add_argument('--h264-sock', required=True, help='H264 stream socket')
     parser.add_argument('--webrtc-sock', help='WebRTC signaling socket')
     args = parser.parse_args()
 
+    CameraHandler.html_dir = args.html_dir
     CameraHandler.jpeg_sock = args.jpeg_sock
     CameraHandler.mjpeg_sock = args.mjpeg_sock
     CameraHandler.h264_sock = args.h264_sock
@@ -230,13 +234,15 @@ def main():
 
     server = ThreadingHTTPServer((args.bind, args.port), CameraHandler)
     log(f"Server running on http://{args.bind}:{args.port}")
-    log(f"  /snapshot.jpg - JPEG snapshot")
-    log(f"  /stream.mjpg  - MJPEG stream")
-    log(f"  /stream.h264  - H264 stream")
-    log(f"  /player       - H264 player")
+    log(f"  HTML directory: {args.html_dir}")
+    log(f"  /              - Camera index")
+    log(f"  /snapshot.jpg  - JPEG snapshot")
+    log(f"  /stream.mjpg   - MJPEG stream")
+    log(f"  /stream.h264   - H264 stream")
+    log(f"  /player        - H264 player")
     if args.webrtc_sock:
-        log(f"  /webrtc       - WebRTC player")
-        log(f"  POST /webrtc  - WebRTC offer")
+        log(f"  /webrtc        - WebRTC player")
+        log(f"  POST /webrtc   - WebRTC offer")
 
     try:
         server.serve_forever()
