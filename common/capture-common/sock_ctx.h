@@ -18,6 +18,8 @@ typedef struct {
     bool need_keyframe;
 } sock_ctx_t;
 
+#define DEFAULT_SOCK_CTX {.path = NULL, .listen_fd = -1}
+
 static int sock_open(sock_ctx_t *ctx, const char *path)
 {
     ctx->path = path;

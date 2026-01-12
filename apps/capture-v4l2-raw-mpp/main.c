@@ -226,13 +226,13 @@ int main(int argc, char *argv[])
     }
 
     unsigned int pixfmt = parse_v4l2_format(format);
-    v4l2_capture_t v4l2 = {0};
+    v4l2_capture_t v4l2 = DEFAULT_V4L2_CAPTURE;
     mpp_enc_ctx_t mpp_jpeg = {0};
     mpp_enc_ctx_t mpp_h264 = {0};
-    sock_ctx_t jpeg_sock = {0};
-    sock_ctx_t mjpeg_sock = {0};
-    sock_ctx_t h264_sock = {0};
-    sock_ctx_t raw_frame_sock = {0};
+    sock_ctx_t jpeg_sock = DEFAULT_SOCK_CTX;
+    sock_ctx_t mjpeg_sock = DEFAULT_SOCK_CTX;
+    sock_ctx_t h264_sock = DEFAULT_SOCK_CTX;
+    sock_ctx_t raw_frame_sock = DEFAULT_SOCK_CTX;
 
     log_printf("Device: %s\n", device);
     log_printf("Resolution: %dx%d\n", width, height);

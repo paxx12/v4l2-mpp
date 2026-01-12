@@ -33,6 +33,8 @@ typedef struct {
     unsigned int num_planes;
 } v4l2_capture_t;
 
+#define DEFAULT_V4L2_CAPTURE {.fd = -1}
+
 static int v4l2_ioctl(int fd, int request, void *arg)
 {
     int r;
