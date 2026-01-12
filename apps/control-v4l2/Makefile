@@ -1,5 +1,5 @@
-TARGET = v4l2-ctrls.py
-SRC = v4l2-ctrls.py
+TARGET = control-v4l2.py
+SRC = control-v4l2.py
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin

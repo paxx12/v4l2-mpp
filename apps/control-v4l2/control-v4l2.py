@@ -3,12 +3,13 @@
 Standalone V4L2 controls JSON-RPC service.
 
 Usage example:
-  python3 apps/v4l2-ctrls/v4l2-ctrls.py --device /dev/video11 --socket /tmp/v4l2-ctrls.sock
+  python3 apps/control-v4l2/control-v4l2.py --device /dev/video11 --socket /tmp/control-v4l2.sock
 """
 
 import argparse
 import json
 import os
+import selectors
 import socket
 import subprocess
 import time
@@ -224,16 +225,6 @@ def read_device_info(device: str) -> str:
     return out
 
 
-def default_state_file(device: str) -> Path:
-    base = os.path.basename(device).replace("/", "_") or "device"
-    state_home = os.getenv("XDG_STATE_HOME")
-    if not state_home:
-        state_home = os.path.join(Path.home(), ".local", "state")
-    state_dir = Path(state_home) / "v4l2-ctrls"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return state_dir / f"{base}.json"
-
-
 def load_state(path: Path) -> Dict[str, int]:
     if not path.exists():
         return {}
@@ -285,7 +276,7 @@ class JsonRpcError(Exception):
         self.message = message
 
 
-def handle_rpc(device: str, state_path: Path, request: Dict) -> Optional[Dict]:
+def handle_rpc(device: str, state_path: Optional[Path], request: Dict) -> Optional[Dict]:
     if request.get("jsonrpc") != "2.0":
         raise JsonRpcError(-32600, "Invalid JSON-RPC version")
     method = request.get("method")
@@ -323,9 +314,10 @@ def handle_rpc(device: str, state_path: Path, request: Dict) -> Optional[Dict]:
         ok, out, err, code = apply_controls(device, remaining)
         if not ok:
             raise JsonRpcError(-32000, err or out or f"Failed to set controls (code {code})")
-        persisted = load_state(state_path)
-        persisted.update(validated)
-        save_state(state_path, persisted)
+        if state_path is not None:
+            persisted = load_state(state_path)
+            persisted.update(validated)
+            save_state(state_path, persisted)
         result = {"applied": validated, "stdout": out}
     elif method == "info":
         info = read_device_info(device)
@@ -338,7 +330,7 @@ def handle_rpc(device: str, state_path: Path, request: Dict) -> Optional[Dict]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def serve_socket(device: str, socket_path: str, state_path: Path) -> None:
+def serve_socket(device: str, socket_path: str, state_path: Optional[Path]) -> None:
     if os.path.exists(socket_path):
         os.unlink(socket_path)
 
@@ -397,15 +389,17 @@ def main() -> None:
     parser.add_argument("--state-file", help="Optional path to persist control state")
     args = parser.parse_args()
 
-    state_path = Path(args.state_file) if args.state_file else default_state_file(args.device)
+    state_path = Path(args.state_file) if args.state_file else None
 
-    log(f"Starting v4l2-ctrls for {args.device}")
-    log(f"Persisted state: {state_path}")
-
-    try:
-        restore_state(args.device, state_path)
-    except Exception as exc:
-        log(f"Failed to restore persisted state: {exc}")
+    log(f"Starting control-v4l2 for {args.device}")
+    if state_path:
+        log(f"Persisted state: {state_path}")
+        try:
+            restore_state(args.device, state_path)
+        except Exception as exc:
+            log(f"Failed to restore persisted state: {exc}")
+    else:
+        log("No state file specified, controls will not be persisted")
 
     serve_socket(args.device, args.socket, state_path)
 

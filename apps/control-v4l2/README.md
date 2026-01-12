@@ -1,4 +1,4 @@
-# v4l2-ctrls
+# control-v4l2
 
 Standalone JSON-RPC service for managing V4L2 camera controls.
 
@@ -17,15 +17,15 @@ Standalone JSON-RPC service for managing V4L2 camera controls.
 ## Usage
 
 ```sh
-python3 v4l2-ctrls.py --device /dev/video11 --socket /tmp/v4l2-ctrls.sock
+python3 control-v4l2.py --device /dev/video11 --socket /tmp/control-v4l2.sock
 ```
 
 **Optional state file:**
 ```sh
-python3 v4l2-ctrls.py \
+python3 control-v4l2.py \
   --device /dev/video11 \
-  --socket /tmp/v4l2-ctrls.sock \
-  --state-file /var/lib/v4l2-ctrls/video11.json
+  --socket /tmp/control-v4l2.sock \
+  --state-file /var/lib/control-v4l2/video11.json
 ```
 
 ## Command-line Options
@@ -64,10 +64,10 @@ Returns device information from `v4l2-ctl -D`.
 
 ## Integration
 
-Pair `v4l2-ctrls` with `stream-http` by passing `--control-sock` to the HTTP server. The UI is served by `stream-http` under `/control/`.
+Pair `control-v4l2` with `stream-http` by passing `--control-sock` to the HTTP server. The UI is served by `stream-http` under `/control/`.
 
 ## Notes
 
 - Persisted controls are restored on startup after validating against the current device controls.
-- The default persistence location is `$XDG_STATE_HOME/v4l2-ctrls/<device>.json` (or `~/.local/state/v4l2-ctrls/` if unset).
+- The default persistence location is `$XDG_STATE_HOME/control-v4l2/<device>.json` (or `~/.local/state/control-v4l2/` if unset).
 - Auto/manual mode controls (exposure/focus/white-balance) are applied before dependent controls to avoid precedence issues.
