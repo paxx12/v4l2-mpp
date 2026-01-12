@@ -15,10 +15,6 @@ if id -u lava &> /dev/null; then
     RUNCMD="su lava"
 fi
 
-"$DIR/fake-service" \
-    --retry 3 \
-    --syslog \
-    -- \
 "$DIR/capture-v4l2-raw-mpp" \
     --device /dev/video11 --format nv12 \
     --jpeg-quality 7 \
