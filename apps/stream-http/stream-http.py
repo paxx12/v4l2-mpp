@@ -100,7 +100,9 @@ class CameraHandler(SimpleHTTPRequestHandler):
         elif path == '/control' and not self.control_sock:
             self.send_error(503, 'Control not available')
         elif path == '/webrtc' and not self.webrtc_sock:
-            self.send_error(503, 'WebRTC not available')
+            self.send_response(302)
+            self.send_header('Location', 'player')
+            self.end_headers()
         elif path not in ALLOWED_PATHS:
             self.send_error(404, "File not found")
         else:
