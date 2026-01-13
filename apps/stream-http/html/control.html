@@ -303,13 +303,8 @@
       localStorage.setItem(storageKey('theme'), theme);
     }
 
-    function baseStreamUrl() {
-      return new URL('..', window.location.href);
-    }
-
     function buildPreviewUrl(mode) {
-      const base = baseStreamUrl();
-      return new URL(PREVIEW_PATHS[mode], base).toString();
+      return PREVIEW_PATHS[mode];
     }
 
     function appendCacheBuster(url) {
