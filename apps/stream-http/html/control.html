@@ -146,9 +146,17 @@
       border: 1px solid var(--border);
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
     }
+    .control.modified {
+      border-left: 3px solid var(--accent);
+    }
     .control-title {
       font-size: 14px;
       margin-bottom: 6px;
+    }
+    .control-title .default-badge {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: normal;
     }
     .control-grid {
       display: grid;
@@ -294,13 +302,34 @@
       preview.innerHTML = '<iframe src="webrtc"></iframe>';
     }
 
+    function checkModified(wrapper, control, currentValue) {
+      const defaultValue = control.default;
+      if (defaultValue !== null && defaultValue !== undefined && currentValue !== defaultValue) {
+        wrapper.classList.add('modified');
+      } else {
+        wrapper.classList.remove('modified');
+      }
+    }
+
     function buildControl(control) {
       const wrapper = document.createElement('div');
       wrapper.className = 'control';
+      wrapper.dataset.controlName = control.name;
       const title = document.createElement('div');
       title.className = 'control-title';
       title.textContent = control.name;
+      if (control.default !== null && control.default !== undefined) {
+        const badge = document.createElement('span');
+        badge.className = 'default-badge';
+        badge.textContent = ` [default: ${control.default}]`;
+        title.appendChild(badge);
+      }
+      if (control.readonly) {
+        title.textContent += ' (read-only)';
+        title.style.opacity = '0.6';
+      }
       wrapper.appendChild(title);
+      checkModified(wrapper, control, control.value);
 
       if (control.type === 'int') {
         const row = document.createElement('div');
@@ -313,6 +342,7 @@
         range.value = control.value;
         range.dataset.control = control.name;
         range.dataset.role = 'value';
+        range.disabled = control.readonly || false;
         const pill = document.createElement('div');
         pill.className = 'value-pill';
         pill.textContent = String(control.value);
@@ -324,9 +354,11 @@
         number.value = control.value;
         number.dataset.control = control.name;
         number.dataset.role = 'value';
+        number.disabled = control.readonly || false;
         range.addEventListener('input', () => {
           number.value = range.value;
           pill.textContent = range.value;
+          checkModified(wrapper, control, parseInt(range.value, 10));
         });
         range.addEventListener('change', () => {
           scheduleAutoApply();
@@ -334,6 +366,7 @@
         number.addEventListener('input', () => {
           range.value = number.value;
           pill.textContent = number.value;
+          checkModified(wrapper, control, parseInt(number.value, 10));
         });
         number.addEventListener('change', () => {
           scheduleAutoApply();
@@ -346,12 +379,14 @@
         const select = document.createElement('select');
         select.dataset.control = control.name;
         select.dataset.role = 'value';
+        select.disabled = control.readonly || false;
         const off = new Option('Off', '0');
         const on = new Option('On', '1');
         select.add(off);
         select.add(on);
         select.value = String(control.value || 0);
         select.addEventListener('change', () => {
+          checkModified(wrapper, control, parseInt(select.value, 10));
           scheduleAutoApply();
         });
         wrapper.appendChild(select);
@@ -359,12 +394,14 @@
         const select = document.createElement('select');
         select.dataset.control = control.name;
         select.dataset.role = 'value';
+        select.disabled = control.readonly || false;
         (control.menu || []).forEach(item => {
           const opt = new Option(item.label, String(item.value));
           select.add(opt);
         });
         select.value = String(control.value || 0);
         select.addEventListener('change', () => {
+          checkModified(wrapper, control, parseInt(select.value, 10));
           scheduleAutoApply();
         });
         wrapper.appendChild(select);
@@ -481,10 +518,39 @@
       }, 500);
     }
 
+    function resetControlToDefault(controlName) {
+      const ctrl = currentControls.find(c => c.name === controlName);
+      if (!ctrl || ctrl.default === null || ctrl.default === undefined) {
+        return;
+      }
+      const elements = controlsContainer.querySelectorAll(`[data-control="${controlName}"][data-role="value"]`);
+      elements.forEach(el => {
+        el.value = String(ctrl.default);
+        if (el.type === 'range') {
+          const wrapper = el.closest('.control');
+          const pill = wrapper.querySelector('.value-pill');
+          if (pill) {
+            pill.textContent = String(ctrl.default);
+          }
+          const number = wrapper.querySelector('input[type="number"]');
+          if (number) {
+            number.value = String(ctrl.default);
+          }
+        }
+        const wrapper = el.closest('.control');
+        if (wrapper) {
+          checkModified(wrapper, ctrl, ctrl.default);
+        }
+      });
+    }
+
     async function applyChanges() {
       const payload = {};
       const previous = controlMap(lastControls);
       controlsContainer.querySelectorAll('[data-control][data-role="value"]').forEach(el => {
+        if (el.disabled) {
+          return;
+        }
         const name = el.dataset.control;
         const parsed = parseInt(el.value, 10);
         if (Number.isNaN(parsed)) {
@@ -506,6 +572,8 @@
         await fetchControls(true);
       } catch (err) {
         logStatus(`Error: ${err.message}`);
+        Object.keys(payload).forEach(name => resetControlToDefault(name));
+        await fetchControls(true);
       } finally {
         applyButton.disabled = false;
       }
@@ -531,13 +599,28 @@
       localStorage.setItem(storageKey('auto-apply'), autoApplyCheckbox.checked);
     });
     applyButton.addEventListener('click', applyChanges);
-    resetButton.addEventListener('click', () => {
-      if (!lastControls.length) {
-        logStatus('No controls to reset.');
-        return;
+    resetButton.addEventListener('click', async () => {
+      resetButton.disabled = true;
+      try {
+        logStatus('Resetting controls to defaults...');
+        const data = await rpc('reset');
+        const succeeded = data.succeeded || [];
+        const failed = data.failed || [];
+        let msg = `Reset: ${succeeded.length} succeeded, ${failed.length} failed. State: ${data.state_removed ? 'removed' : 'not found'}.`;
+        if (failed.length > 0) {
+          msg += '\n\nFailed:';
+          failed.forEach(f => {
+            const err = f.error.replace(/^.*:\s*/, '').replace(/\s+/g, ' ').trim();
+            msg += `\n  ${f.name}: ${err}`;
+          });
+        }
+        logStatus(msg);
+        await fetchControls(true);
+      } catch (err) {
+        logStatus(`Error: ${err.message}`);
+      } finally {
+        resetButton.disabled = false;
       }
-      renderControls(lastControls);
-      logStatus('Reset to last loaded values.');
     });
 
     init().catch(err => {

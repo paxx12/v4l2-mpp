@@ -95,6 +95,13 @@ def parse_ctrls(output: str) -> List[Dict]:
         ctrl_type = None
         if type_start != -1 and type_end != -1:
             ctrl_type = line[type_start + 1 : type_end].strip()
+        flags_index = line.find("flags=")
+        read_only = False
+        inactive = False
+        if flags_index != -1:
+            flags_part = line[flags_index + 6:]
+            read_only = "read-only" in flags_part
+            inactive = "inactive" in flags_part
         controls.append(
             {
                 "name": name,
@@ -102,7 +109,10 @@ def parse_ctrls(output: str) -> List[Dict]:
                 "min": get_int_from_parts(parts, "min"),
                 "max": get_int_from_parts(parts, "max"),
                 "step": get_int_from_parts(parts, "step"),
+                "default": get_int_from_parts(parts, "default"),
                 "value": get_int_from_parts(parts, "value"),
+                "readonly": read_only,
+                "inactive": inactive,
                 "menu": [],
             }
         )
@@ -177,11 +187,14 @@ def validate_values(values: Dict[str, int], controls: List[Dict]) -> Dict[str, i
     for key, value in values.items():
         if key not in allowlist:
             raise ValueError(f"Unknown control: {key}")
+        ctrl_def = control_map.get(key)
+        if ctrl_def and ctrl_def.get("readonly"):
+            log(f"Skipping read-only control: {key}")
+            continue
         if isinstance(value, bool):
             value = int(value)
         if not isinstance(value, int):
             raise ValueError(f"Value for {key} must be integer")
-        ctrl_def = control_map.get(key)
         if ctrl_def:
             min_val = ctrl_def.get("min")
             max_val = ctrl_def.get("max")
@@ -204,6 +217,11 @@ def split_controls_by_precedence(values: Dict[str, int]) -> Tuple[Dict[str, int]
     auto_first = {key: value for key, value in values.items() if key in AUTO_FIRST_CONTROLS}
     remaining = {key: value for key, value in values.items() if key not in AUTO_FIRST_CONTROLS}
     return auto_first, remaining
+
+def order_controls_by_precedence(values: Dict[str, int]) -> List[Tuple[str, int]]:
+    items = list(values.items())
+    items.sort(key=lambda item: (0 if item[0] in AUTO_FIRST_CONTROLS else 1, item[0]))
+    return items
 
 def read_device_info(device: str) -> str:
     code, out, err = run_v4l2(["v4l2-ctl", "-d", device, "-D"])
@@ -241,16 +259,19 @@ def restore_state(device: str, path: Path) -> None:
     if not validated:
         log("No valid persisted controls to apply")
         return
-    auto_first, remaining = split_controls_by_precedence(validated)
-    ok, out, err, code = apply_controls(device, auto_first)
-    if not ok:
-        log(f"Failed to restore auto controls: code={code}, err={err or out}")
-        return
-    ok, out, err, code = apply_controls(device, remaining)
-    if ok:
-        log(f"Restored {len(validated)} controls from {path}")
-    else:
-        log(f"Failed to restore controls: code={code}, err={err or out}")
+    succeeded = []
+    failed = []
+    for name, value in order_controls_by_precedence(validated):
+        ok, out, err, code = apply_controls(device, {name: value})
+        if ok:
+            succeeded.append(name)
+        else:
+            failed.append(name)
+            log(f"Failed to restore {name}: {err or out}")
+    if succeeded:
+        log(f"Restored {len(succeeded)} controls from {path}")
+    if failed:
+        log(f"Failed to restore {len(failed)} controls: {', '.join(failed)}")
 
 class JsonRpcError(Exception):
     def __init__(self, code: int, message: str):
@@ -299,11 +320,40 @@ def handle_info_method(device: str, state_path: Optional[Path], params: Dict) ->
     info = read_device_info(device)
     return {"info": info}
 
+def handle_reset_method(device: str, state_path: Optional[Path], params: Dict) -> Dict:
+    controls = fetch_controls(device)
+    defaults = {}
+    for ctrl in controls:
+        if ctrl.get("readonly"):
+            continue
+        default_value = ctrl.get("default")
+        if default_value is not None:
+            defaults[ctrl["name"]] = default_value
+    succeeded = []
+    failed = []
+    if not defaults:
+        log("No default values found for controls")
+    else:
+        ordered = order_controls_by_precedence(defaults)
+        for name, value in ordered:
+            ok, out, err, code = apply_controls(device, {name: value})
+            if ok:
+                succeeded.append(name)
+            else:
+                failed.append({"name": name, "error": err or out or f"code {code}"})
+                log(f"Failed to reset {name}: {err or out}")
+        log(f"Reset {len(succeeded)} controls to defaults, {len(failed)} failed")
+    if state_path is not None and state_path.exists():
+        state_path.unlink()
+        log(f"Removed state file: {state_path}")
+    return {"succeeded": succeeded, "failed": failed, "state_removed": state_path is not None and not state_path.exists()}
+
 METHOD_HANDLERS = {
     "list": handle_list_method,
     "get": handle_get_method,
     "set": handle_set_method,
     "info": handle_info_method,
+    "reset": handle_reset_method,
 }
 
 def handle_rpc(device: str, state_path: Optional[Path], request: Dict) -> Optional[Dict]:
