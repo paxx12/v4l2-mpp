@@ -42,7 +42,7 @@ $RUNCMD -c "$BINDIR/stream-http.py \
     --mjpeg-sock /tmp/capture-usb-mjpeg.sock \
     --h264-sock /tmp/capture-usb-h264.sock \
     --webrtc-sock /tmp/capture-usb-webrtc.sock \
-    --detect-sock /tmp/control-usb.sock" &
+    --control-sock /tmp/control-usb.sock" &
 PIDS="$PIDS $!"
 
 $RUNCMD -c "$BINDIR/stream-rtsp \
