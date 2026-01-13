@@ -230,13 +230,7 @@
   <main>
     <section class="panel panel--preview">
       <h2>Preview</h2>
-      <label for="preview-mode">Preview mode</label>
-      <select id="preview-mode">
-        <option value="webrtc">WebRTC</option>
-        <option value="mjpg">MJPG</option>
-        <option value="snapshot">Snapshot</option>
-      </select>
-      <div class="preview" id="preview" style="margin-top:12px;"></div>
+      <div class="preview" id="preview"></div>
       <div class="note">Control settings are persisted by the backend service.</div>
     </section>
     <section class="panel">
@@ -259,7 +253,6 @@
     </section>
   </main>
   <script>
-    const previewMode = document.getElementById('preview-mode');
     const preview = document.getElementById('preview');
     const controlsContainer = document.getElementById('controls');
     const applyButton = document.getElementById('apply');
@@ -284,12 +277,6 @@
       { key: 'image', title: 'Image', match: name => ['sharpness', 'zoom', 'pan', 'tilt'].some(t => name.includes(t)) },
     ];
 
-    const PREVIEW_PATHS = {
-      webrtc: 'webrtc',
-      mjpg: 'stream.mjpg',
-      snapshot: 'snapshot.jpg',
-    };
-
     function logStatus(message) {
       statusBox.textContent = message;
     }
@@ -303,29 +290,8 @@
       localStorage.setItem(storageKey('theme'), theme);
     }
 
-    function buildPreviewUrl(mode) {
-      return PREVIEW_PATHS[mode];
-    }
-
-    function appendCacheBuster(url) {
-      const marker = url.includes('?') ? '&' : '?';
-      return `${url}${marker}t=${Date.now()}`;
-    }
-
     function updatePreview() {
-      const mode = previewMode.value;
-      let previewUrl = buildPreviewUrl(mode);
-      if (mode === 'snapshot') {
-        previewUrl = appendCacheBuster(previewUrl);
-      }
-      if (mode === 'webrtc') {
-        preview.innerHTML = `<iframe src="${previewUrl}"></iframe>`;
-      } else if (mode === 'mjpg') {
-        preview.innerHTML = `<img src="${previewUrl}" alt="MJPG stream" />`;
-      } else {
-        preview.innerHTML = `<img src="${previewUrl}" alt="Snapshot" />`;
-      }
-      localStorage.setItem(storageKey('preview-mode'), mode);
+      preview.innerHTML = '<iframe src="webrtc"></iframe>';
     }
 
     function buildControl(control) {
@@ -538,13 +504,6 @@
         const data = await rpc('set', { controls: payload });
         logStatus(`Applied: ${JSON.stringify(data.applied, null, 2)}`);
         await fetchControls(true);
-        if (previewMode.value === 'snapshot') {
-          updatePreview();
-        } else {
-          const snap = appendCacheBuster(buildPreviewUrl('snapshot'));
-          const img = new Image();
-          img.src = snap;
-        }
       } catch (err) {
         logStatus(`Error: ${err.message}`);
       } finally {
@@ -556,10 +515,6 @@
       const storedTheme = localStorage.getItem(storageKey('theme')) || 'system';
       themeSelect.value = storedTheme;
       applyTheme(storedTheme);
-      const storedMode = localStorage.getItem(storageKey('preview-mode'));
-      if (storedMode) {
-        previewMode.value = storedMode;
-      }
       const storedAutoApply = localStorage.getItem(storageKey('auto-apply'));
       if (storedAutoApply === 'true') {
         autoApplyCheckbox.checked = true;
@@ -569,7 +524,6 @@
       await fetchInfo();
     }
 
-    previewMode.addEventListener('change', updatePreview);
     themeSelect.addEventListener('change', () => {
       applyTheme(themeSelect.value);
     });
