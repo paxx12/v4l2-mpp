@@ -518,6 +518,44 @@
       }, 500);
     }
 
+    function getFocusedControlInfo() {
+      const active = document.activeElement;
+      if (!active || !controlsContainer.contains(active)) {
+        return null;
+      }
+      const controlName = active.dataset.control;
+      const role = active.dataset.role;
+      if (!controlName || role !== 'value') {
+        return null;
+      }
+      return {
+        controlName,
+        tagName: active.tagName,
+        type: active.tagName === 'INPUT' ? active.type : null,
+      };
+    }
+
+    function restoreFocusedControl(info) {
+      if (!info) {
+        return;
+      }
+      const elements = Array.from(
+        controlsContainer.querySelectorAll(`[data-control="${info.controlName}"][data-role="value"]`)
+      );
+      if (!elements.length) {
+        return;
+      }
+      let target = elements[0];
+      if (info.tagName === 'SELECT') {
+        target = elements.find(el => el.tagName === 'SELECT') || target;
+      } else if (info.tagName === 'INPUT' && info.type) {
+        target = elements.find(el => el.tagName === 'INPUT' && el.type === info.type) || target;
+      }
+      if (target && typeof target.focus === 'function') {
+        target.focus({ preventScroll: true });
+      }
+    }
+
     function resetControlToDefault(controlName) {
       const ctrl = currentControls.find(c => c.name === controlName);
       if (!ctrl || ctrl.default === null || ctrl.default === undefined) {
@@ -545,6 +583,7 @@
     }
 
     async function applyChanges() {
+      const focusInfo = getFocusedControlInfo();
       const payload = {};
       const previous = controlMap(lastControls);
       controlsContainer.querySelectorAll('[data-control][data-role="value"]').forEach(el => {
@@ -570,10 +609,12 @@
         const data = await rpc('set', { controls: payload });
         logStatus(`Applied: ${JSON.stringify(data.applied, null, 2)}`);
         await fetchControls(true);
+        restoreFocusedControl(focusInfo);
       } catch (err) {
         logStatus(`Error: ${err.message}`);
         Object.keys(payload).forEach(name => resetControlToDefault(name));
         await fetchControls(true);
+        restoreFocusedControl(focusInfo);
       } finally {
         applyButton.disabled = false;
       }
