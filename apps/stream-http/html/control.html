@@ -518,6 +518,16 @@
       }, 500);
     }
 
+    function updateControlValues(values) {
+      const byName = controlMap(currentControls);
+      Object.entries(values).forEach(([name, value]) => {
+        if (byName[name]) {
+          byName[name].value = value;
+        }
+      });
+      lastControls = JSON.parse(JSON.stringify(currentControls));
+    }
+
     function resetControlToDefault(controlName) {
       const ctrl = currentControls.find(c => c.name === controlName);
       if (!ctrl || ctrl.default === null || ctrl.default === undefined) {
@@ -569,7 +579,11 @@
       try {
         const data = await rpc('set', { controls: payload });
         logStatus(`Applied: ${JSON.stringify(data.applied, null, 2)}`);
-        await fetchControls(true);
+        if (autoApplyCheckbox.checked) {
+          updateControlValues(payload);
+        } else {
+          await fetchControls(true);
+        }
       } catch (err) {
         logStatus(`Error: ${err.message}`);
         Object.keys(payload).forEach(name => resetControlToDefault(name));
