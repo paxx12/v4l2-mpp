@@ -142,10 +142,14 @@ __attribute__((unused)) static MppPacket mpp_encode_mppframe(mpp_enc_ctx_t *ctx,
 {
     MPP_RET ret;
     MppPacket packet = NULL;
-    MppMeta meta = NULL;
 
     if (force_idr) {
-        meta = mpp_frame_get_meta(frame);
+        ret = ctx->mpi->control(ctx->ctx, MPP_ENC_SET_IDR_FRAME, NULL);
+        if (ret != MPP_OK) {
+            log_errorf("MPP_ENC_SET_IDR_FRAME failed: %d\n", ret);
+        }
+
+        MppMeta meta = mpp_frame_get_meta(frame);
         if (meta) {
             mpp_meta_set_s32(meta, KEY_INPUT_IDR_REQ, 1);
         }
