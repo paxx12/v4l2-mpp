@@ -107,6 +107,12 @@ static void cleanup_clients() {
     g_clients.remove_if([](const std::shared_ptr<Client>& c) {
         if (!c->pc || c->pc->state() == rtc::PeerConnection::State::Closed ||
             c->pc->state() == rtc::PeerConnection::State::Failed) {
+            // Explicitly close the PeerConnection to ensure UDP sockets are released
+            try {
+                if (c->pc && c->pc->state() != rtc::PeerConnection::State::Closed) {
+                    c->pc->close();
+                }
+            } catch (...) {}
             log_errorf("Removed client %s\n", c->id.c_str());
             return true;
         }
