@@ -34,16 +34,22 @@ class DynamicH264Stream : public FramedSource
 public:
   DynamicH264Stream(UsageEnvironment& env)
     : FramedSource(env)
+    , isRunning(false)
+    , currentOffset(0)
   {
-    isRunning = false;
-    currentOffset = 0;
+  }
+
+  virtual ~DynamicH264Stream()
+  {
+    std::unique_lock lk(g_streams_lock);
+    g_streams.erase(this);
   }
 
   void sendNewFrame(const BufferPtr &buf)
   {
     std::unique_lock lk(lock);
 
-    if (!isRunning) {
+    if (!isRunning.load(std::memory_order_acquire)) {
       return;
     }
 
@@ -56,12 +62,24 @@ public:
     setNewBuffer(buf);
   }
 
+  void handleClosure()
+  {
+    {
+        std::unique_lock lk(g_streams_lock);
+        g_streams.erase(this);
+        isRunning.store(false, std::memory_order_release);
+    }
+    FramedSource::handleClosure();
+  }
+
   void doGetNextFrame()
   {
-    if (!isRunning) {
+    {
         std::unique_lock lk(g_streams_lock);
-        g_streams.insert(this);
-        isRunning = true;
+        if (!isRunning.load(std::memory_order_acquire)) {
+            g_streams.insert(this);
+            isRunning.store(true, std::memory_order_release);
+        }
     }
 
     std::unique_lock lk(lock);
@@ -96,10 +114,12 @@ public:
 private:
   void doStopGettingFrames()
   {
-    if (isRunning) {
+    {
         std::unique_lock lk(g_streams_lock);
-        g_streams.erase(this);
-        isRunning = false;
+        if (isRunning.load(std::memory_order_acquire)) {
+            g_streams.erase(this);
+            isRunning.store(false, std::memory_order_release);
+        }
     }
 
     std::unique_lock lk(lock);
@@ -112,7 +132,7 @@ private:
     currentOffset = 0;
   }
 
-  bool isRunning;
+  std::atomic<bool> isRunning;
   std::mutex lock;
   BufferPtr currentBuffer;
   unsigned currentOffset;
@@ -190,10 +210,10 @@ static void close_old_clients(size_t max_clients) {
     std::unique_lock lk(g_streams_lock);
 
     while (g_streams.size() > max_clients) {
-        auto it = g_streams.begin();
-        DynamicH264Stream* stream = *it;
-        g_streams.erase(it);
+        DynamicH264Stream* stream = *g_streams.begin();
+        lk.unlock();
         stream->handleClosure();
+        lk.lock();
         log_errorf("Closed old client, current clients: %zu\n", g_streams.size());
     }
 }
@@ -217,7 +237,7 @@ int main(int argc, char* argv[]) {
 
     std::string h264_sock;
     int rtsp_port = 8554;
-    int max_clients = 0;
+    int max_clients = 4;
     int buffer_size = 300000;
 
     enum {
@@ -287,7 +307,8 @@ int main(int argc, char* argv[]) {
 
     UserAuthenticationDatabase* authDB = nullptr;
 
-    RTSPServer* rtspServer = RTSPServer::createNew(*env, rtsp_port, authDB);
+    unsigned reclamationSeconds = 5;
+    RTSPServer* rtspServer = RTSPServer::createNew(*env, rtsp_port, authDB, reclamationSeconds);
     if (rtspServer == nullptr) {
         *env << "Failed to create RTSP server: " << env->getResultMsg() << "\n";
         return 1;
