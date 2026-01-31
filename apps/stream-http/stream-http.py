@@ -7,7 +7,7 @@ import json
 import os
 import fcntl
 import struct
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 ALLOWED_PATHS = {
@@ -99,7 +99,9 @@ class CameraHandler(SimpleHTTPRequestHandler):
         if path == '/snapshot.jpg':
             self.handle_snapshot()
         elif path == '/stream.mjpg':
-            self.handle_mjpeg_stream()
+            query = parse_qs(urlparse(self.path).query)
+            fps = int(query.get('fps', [0])[0])
+            self.handle_mjpeg_stream(fps)
         elif path == '/stream.h264':
             self.handle_h264_stream()
         elif path == '/control' and not self.control_sock:
@@ -149,7 +151,7 @@ class CameraHandler(SimpleHTTPRequestHandler):
         except (FileNotFoundError, IOError, OSError) as e:
             log(f"JPEG error: {e}")
 
-    def handle_mjpeg_stream(self):
+    def handle_mjpeg_stream(self, fps=0):
         if not self.mjpeg_sock:
             self.send_error(503, 'MJPEG stream not available')
             return
@@ -158,7 +160,8 @@ class CameraHandler(SimpleHTTPRequestHandler):
         self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.end_headers()
-        log(f"Connecting to MJPEG socket: {self.mjpeg_sock}")
+        log(f"Connecting to MJPEG socket: {self.mjpeg_sock}, fps={fps}")
+        frame_interval = 1.0 / fps if fps > 0 else 0
         frame_count = 0
         frame_dropped = 0
         frame_droppped_last = 0
@@ -171,6 +174,9 @@ class CameraHandler(SimpleHTTPRequestHandler):
                 if frame_count % 30 == 0:
                     log(f"MJPEG sent {frame_count}, dropped {frame_dropped}, dropped last {frame_dropped - frame_droppped_last}")
                     frame_droppped_last = frame_dropped
+                if frame_interval > 0 and now - last_sent < frame_interval:
+                    frame_dropped += 1
+                    continue
                 buf = fcntl.ioctl(self.connection.fileno(), SIOCOUTQ, b'\x00' * 4)
                 unsent = struct.unpack('I', buf)[0]
                 if unsent >= last_sent_size:
