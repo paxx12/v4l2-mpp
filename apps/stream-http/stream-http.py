@@ -165,6 +165,7 @@ class CameraHandler(SimpleHTTPRequestHandler):
         frame_dropped = 0
         frame_droppped_last = 0
         last_sent = time.monotonic()
+        last_sent_size = 1024 # allow some initial buffer
         try:
             for frame in read_jpeg_frames(self.mjpeg_sock):
                 frame_count += 1
@@ -177,15 +178,17 @@ class CameraHandler(SimpleHTTPRequestHandler):
                     continue
                 buf = fcntl.ioctl(self.connection.fileno(), SIOCOUTQ, b'\x00' * 4)
                 unsent = struct.unpack('I', buf)[0]
-                if unsent > 0:
+                if unsent >= last_sent_size:
                     frame_dropped += 1
                     if now - last_sent > 10.0:
                         raise TimeoutError("No frame sent in 10 seconds")
                     continue
-                self.connection.sendall(b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + str(len(frame)).encode() + b'\r\n\r\n')
+                header = b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + str(len(frame)).encode() + b'\r\n\r\n'
+                self.connection.sendall(header)
                 self.connection.sendall(frame)
                 self.connection.sendall(b'\r\n')
                 last_sent = now
+                last_sent_size = len(header) + len(frame) + 2
             log(f"MJPEG socket EOF. Sent {frame_count}, dropped {frame_dropped}")
         except (BrokenPipeError, ConnectionResetError) as e:
             log(f"MJPEG client disconnected: {e}. Sent {frame_count}, dropped {frame_dropped}")
