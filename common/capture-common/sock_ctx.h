@@ -1,20 +1,26 @@
 #ifndef SOCK_CTX_H
 #define SOCK_CTX_H
 
+#include <linux/sockios.h>
 #include <stdbool.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <time.h>
 #include "log.h"
 
 #define SOCK_MAX_CLIENTS 8
 #define SOCK_WRITE_TIMEOUT_MS 100
+#define SOCK_CLIENT_IDLE_TIMEOUT_MS 1000
 
 typedef struct {
     const char *path;
     int listen_fd;
     int client_fds[SOCK_MAX_CLIENTS];
+    struct timespec client_last_frame[SOCK_MAX_CLIENTS];
+    int dropped_frames[SOCK_MAX_CLIENTS];
     int num_clients;
     bool one_frame;
+    bool allow_drops;
     bool need_keyframe;
 } sock_ctx_t;
 
@@ -114,6 +120,8 @@ static bool sock_accept_clients(sock_ctx_t *ctx)
 
         if (slot >= 0) {
             ctx->client_fds[slot] = client_fd;
+            clock_gettime(CLOCK_MONOTONIC, &ctx->client_last_frame[slot]);
+            ctx->dropped_frames[slot] = 0;
             ctx->num_clients++;
             ctx->need_keyframe = true;
             accepted = true;
@@ -153,11 +161,18 @@ static void sock_wait_fds(sock_ctx_t *socks[], int timeout_ms)
     select(maxfd + 1, &rfds, NULL, NULL, &tv);
 }
 
-static ssize_t sock_write_client_fd(int fd, const void *data, size_t size)
+static ssize_t sock_write_client_fd(int fd, const void *data, size_t size, bool allow_drops)
 {
     const char *ptr = data;
     size_t remaining = size;
     struct timespec start, now;
+
+    if (allow_drops) {
+        int unsent = 0;
+        if (ioctl(fd, SIOCOUTQ, &unsent) < 0 || unsent > 0) {
+            return 0;
+        }
+    }
 
     clock_gettime(CLOCK_MONOTONIC, &start);
 
@@ -189,23 +204,45 @@ static ssize_t sock_write_client_fd(int fd, const void *data, size_t size)
 static void sock_write_cb(const void *data, size_t size, void *arg)
 {
     sock_ctx_t *ctx = arg;
+    struct timespec now;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
 
     for (int i = 0; i < SOCK_MAX_CLIENTS; i++) {
         if (ctx->client_fds[i] < 0)
             continue;
 
-        if (sock_write_client_fd(ctx->client_fds[i], data, size) < 0) {
+        ssize_t ret = sock_write_client_fd(ctx->client_fds[i], data, size, ctx->allow_drops);
+        if (ret < 0) {
             if (errno == ETIMEDOUT) {
-                log_printf("Socket %s: client %d timeout (%dms), closing\n",
-                       ctx->path, i, SOCK_WRITE_TIMEOUT_MS);
+                log_printf("Socket %s: client %d timeout (%dms), %d dropped, closing\n",
+                       ctx->path, i, SOCK_WRITE_TIMEOUT_MS, ctx->dropped_frames[i]);
             } else {
-                log_printf("Socket %s: error writing to client %d, closing\n", ctx->path, i);
+                log_printf("Socket %s: client %d error, %d dropped, closing\n",
+                       ctx->path, i, ctx->dropped_frames[i]);
             }
             close(ctx->client_fds[i]);
             ctx->client_fds[i] = -1;
             ctx->num_clients--;
             continue;
         }
+
+        if (ret == 0) {
+            ctx->dropped_frames[i]++;
+            long idle_ms = (now.tv_sec - ctx->client_last_frame[i].tv_sec) * 1000 +
+                           (now.tv_nsec - ctx->client_last_frame[i].tv_nsec) / 1000000;
+            if (idle_ms >= SOCK_CLIENT_IDLE_TIMEOUT_MS) {
+                log_printf("Socket %s: client %d idle for %ldms (%d dropped), closing\n",
+                       ctx->path, i, idle_ms, ctx->dropped_frames[i]);
+                close(ctx->client_fds[i]);
+                ctx->client_fds[i] = -1;
+                ctx->num_clients--;
+            }
+            continue;
+        }
+
+        ctx->client_last_frame[i] = now;
+        ctx->dropped_frames[i] = 0;
 
         if (ctx->one_frame) {
             log_printf("Socket %s: closing client %d after one frame\n", ctx->path, i);
@@ -214,10 +251,6 @@ static void sock_write_cb(const void *data, size_t size, void *arg)
             ctx->num_clients--;
         }
     }
-
-    // if (debug && ctx->num_clients > 0) {
-    //     printf("Wrote %zu bytes to socket %s (%d clients)\n", size, ctx->path, ctx->num_clients);
-    // }
 }
 
 #endif
