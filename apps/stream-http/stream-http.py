@@ -5,6 +5,8 @@ import argparse
 import time
 import json
 import os
+import threading
+import queue
 from urllib.parse import urlparse
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
@@ -153,21 +155,59 @@ class CameraHandler(SimpleHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.end_headers()
         log(f"Connecting to MJPEG socket: {self.mjpeg_sock}")
+
+        # We need to read from a separate thread to keep the socket drained.
+        # The socket producer process will end the stream if the socket isn't read at least every 100ms.
+        # The http TCP socket may get blocked if the client is slow, so use a queue to buffer frames.
+        # Usually it take 1ms to write a frame, but have seen hiccups of up to 230ms.
+        frame_queue = queue.Queue(maxsize=2)
+        reader_error = [None]
+        is_http_connected = True
+        def reader_thread():
+            try:
+                for frame in read_jpeg_frames(self.mjpeg_sock):
+                    if not is_http_connected:
+                        return
+                    # Drop oldest frame if queue is full so the socket stays drained
+                    try:
+                        frame_queue.put_nowait(frame)
+                    except queue.Full:
+                        try:
+                            frame_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        frame_queue.put_nowait(frame)
+            except Exception as e:
+                reader_error[0] = e
+            finally:
+                frame_queue.put(None)  # sentinel
+        t = threading.Thread(target=reader_thread, daemon=True)
+        t.start()
+
         frame_count = 0
         try:
-            for frame in read_jpeg_frames(self.mjpeg_sock):
-                self.wfile.write(b'--frame\r\nContent-Type: image/jpeg\r\n\r\n')
+            while True:
+                frame = frame_queue.get()
+                if frame is None:
+                    break
+                self.wfile.write(b'--frame\r\nContent-Type: image/jpeg\r\n')
+                self.wfile.write(f'Content-Length: {len(frame)}\r\n'.encode())
+                self.wfile.write(b'\r\n')
                 self.wfile.write(frame)
                 self.wfile.write(b'\r\n')
                 self.wfile.flush()
                 frame_count += 1
                 if frame_count % 30 == 0:
                     log(f"MJPEG sent {frame_count} frames")
+            if reader_error[0]:
+                raise reader_error[0]
             log("MJPEG socket EOF")
         except (BrokenPipeError, ConnectionResetError) as e:
             log(f"MJPEG client disconnected: {e}")
         except (IOError, OSError) as e:
             log(f"MJPEG stream error: {e}")
+        finally:
+            is_http_connected = False
 
     def handle_h264_stream(self):
         if not self.h264_sock:
