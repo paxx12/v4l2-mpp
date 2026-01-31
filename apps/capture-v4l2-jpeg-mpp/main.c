@@ -203,6 +203,7 @@ int main(int argc, char *argv[])
         log_errorf( "Failed to open MJPEG socket\n");
         goto error;
     }
+    mjpeg_sock.allow_drops = true;
 
     if (h264_stream) {
         if (mpp_jpeg_decoder_init(&mpp_dec, v4l2.width, v4l2.height, MPP_FMT_YUV420SP) < 0) {
