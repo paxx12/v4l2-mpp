@@ -5,6 +5,8 @@ import argparse
 import time
 import json
 import os
+import fcntl
+import struct
 from urllib.parse import urlparse
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
@@ -18,6 +20,9 @@ ALLOWED_PATHS = {
 def log(msg):
     ts = time.strftime('%H:%M:%S')
     print(f"[{ts}] {msg}", flush=True)
+
+SIOCOUTQ = 0x5411
+MJPEG_SEND_TIMEOUT_MS = 10000
 
 def read_socket(sock_path, chunk_size=65536):
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -148,26 +153,44 @@ class CameraHandler(SimpleHTTPRequestHandler):
         if not self.mjpeg_sock:
             self.send_error(503, 'MJPEG stream not available')
             return
+        self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 128 * 1024)
         self.send_response(200)
         self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.end_headers()
         log(f"Connecting to MJPEG socket: {self.mjpeg_sock}")
         frame_count = 0
+        frame_dropped = 0
+        frame_droppped_last = 0
+        last_sent = time.monotonic()
+        last_sent_size = 1024 # allow some initial buffer
         try:
             for frame in read_jpeg_frames(self.mjpeg_sock):
-                self.wfile.write(b'--frame\r\nContent-Type: image/jpeg\r\n\r\n')
-                self.wfile.write(frame)
-                self.wfile.write(b'\r\n')
-                self.wfile.flush()
+                now = time.monotonic()
                 frame_count += 1
                 if frame_count % 30 == 0:
-                    log(f"MJPEG sent {frame_count} frames")
-            log("MJPEG socket EOF")
+                    log(f"MJPEG sent {frame_count}, dropped {frame_dropped}, dropped last {frame_dropped - frame_droppped_last}")
+                    frame_droppped_last = frame_dropped
+                buf = fcntl.ioctl(self.connection.fileno(), SIOCOUTQ, b'\x00' * 4)
+                unsent = struct.unpack('I', buf)[0]
+                if unsent >= last_sent_size:
+                    frame_dropped += 1
+                    if (now - last_sent) * 1000 > MJPEG_SEND_TIMEOUT_MS:
+                        raise TimeoutError(f"No frame sent in {MJPEG_SEND_TIMEOUT_MS}ms")
+                    continue
+                header = b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + str(len(frame)).encode() + b'\r\n\r\n'
+                self.connection.sendall(header)
+                self.connection.sendall(frame)
+                self.connection.sendall(b'\r\n')
+                last_sent = now
+                last_sent_size = len(header) + len(frame) + 2
+            log(f"MJPEG socket EOF. Sent {frame_count}, dropped {frame_dropped}")
         except (BrokenPipeError, ConnectionResetError) as e:
-            log(f"MJPEG client disconnected: {e}")
+            log(f"MJPEG client disconnected: {e}. Sent {frame_count}, dropped {frame_dropped}")
+        except TimeoutError as e:
+            log(f"MJPEG client stale: {e}. Sent {frame_count}, dropped {frame_dropped}")
         except (IOError, OSError) as e:
-            log(f"MJPEG stream error: {e}")
+            log(f"MJPEG stream error: {e}. Sent {frame_count}, dropped {frame_dropped}")
 
     def handle_h264_stream(self):
         if not self.h264_sock:
@@ -191,7 +214,7 @@ class CameraHandler(SimpleHTTPRequestHandler):
                     last_bytes = 0
             log("H264 socket EOF")
         except (BrokenPipeError, ConnectionResetError) as e:
-            log(f"H264 client disconnected: {e}")
+            log(f"H264 client disconnected: {e}. Sent {total_bytes // 1024}KB")
         except (IOError, OSError) as e:
             log(f"H264 stream error: {e}")
 
