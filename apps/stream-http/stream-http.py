@@ -7,7 +7,7 @@ import json
 import os
 import fcntl
 import struct
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 ALLOWED_PATHS = {
@@ -98,7 +98,9 @@ class CameraHandler(SimpleHTTPRequestHandler):
         if path == '/snapshot.jpg':
             self.handle_snapshot()
         elif path == '/stream.mjpg':
-            self.handle_mjpeg_stream()
+            query = parse_qs(urlparse(self.path).query)
+            fps = int(query.get('fps', [0])[0])
+            self.handle_mjpeg_stream(fps)
         elif path == '/stream.h264':
             self.handle_h264_stream()
         elif path == '/control' and not self.control_sock:
@@ -148,7 +150,7 @@ class CameraHandler(SimpleHTTPRequestHandler):
         except (FileNotFoundError, IOError, OSError) as e:
             log(f"JPEG error: {e}")
 
-    def handle_mjpeg_stream(self):
+    def handle_mjpeg_stream(self, fps=0):
         if not self.mjpeg_sock:
             self.send_error(503, 'MJPEG stream not available')
             return
@@ -157,7 +159,8 @@ class CameraHandler(SimpleHTTPRequestHandler):
         self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.end_headers()
-        log(f"Connecting to MJPEG socket: {self.mjpeg_sock}")
+        log(f"Connecting to MJPEG socket: {self.mjpeg_sock}, fps={fps}")
+        frame_interval = 1.0 / fps if fps > 0 else 0
         frame_count = 0
         frame_dropped = 0
         frame_droppped_last = 0
@@ -165,20 +168,24 @@ class CameraHandler(SimpleHTTPRequestHandler):
         try:
             for frame in read_jpeg_frames(self.mjpeg_sock):
                 frame_count += 1
+                now = time.monotonic()
                 if frame_count % 30 == 0:
                     log(f"MJPEG sent {frame_count}, dropped {frame_dropped}, dropped last {frame_dropped - frame_droppped_last}")
                     frame_droppped_last = frame_dropped
+                if frame_interval > 0 and now - last_sent < frame_interval:
+                    frame_dropped += 1
+                    continue
                 buf = fcntl.ioctl(self.connection.fileno(), SIOCOUTQ, b'\x00' * 4)
                 unsent = struct.unpack('I', buf)[0]
                 if unsent > 0:
                     frame_dropped += 1
-                    if time.monotonic() - last_sent > 10.0:
+                    if now - last_sent > 10.0:
                         raise TimeoutError("No frame sent in 10 seconds")
                     continue
                 self.connection.sendall(b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + str(len(frame)).encode() + b'\r\n\r\n')
                 self.connection.sendall(frame)
                 self.connection.sendall(b'\r\n')
-                last_sent = time.monotonic()
+                last_sent = now
             log(f"MJPEG socket EOF. Sent {frame_count}, dropped {frame_dropped}")
         except (BrokenPipeError, ConnectionResetError) as e:
             log(f"MJPEG client disconnected: {e}. Sent {frame_count}, dropped {frame_dropped}")
