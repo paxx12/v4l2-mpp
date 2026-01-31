@@ -180,7 +180,8 @@ class CameraHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 reader_error[0] = e
             finally:
-                frame_queue.put(None)  # sentinel
+                # Put None to signal EOF
+                frame_queue.put(None)
         t = threading.Thread(target=reader_thread, daemon=True)
         t.start()
 
