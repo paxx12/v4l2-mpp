@@ -13,6 +13,7 @@ V4L2 camera capture and streaming tools with Rockchip MPP hardware encoding for 
 | stream-http | HTTP server for camera streaming (snapshots, MJPEG, H264, browser player) |
 | stream-webrtc | WebRTC server for low-latency H264 video streaming |
 | control-v4l2 | JSON-RPC service for managing V4L2 camera controls with optional persistence |
+| capture-pycamera2 | PyCamera2 capture for Raspberry Pi cameras with JPEG/H264 sockets and integrated controls |
 
 ## Building
 
@@ -22,7 +23,7 @@ cd apps/capture-v4l2-raw-mpp && make
 cd apps/capture-v4l2-jpeg-mpp && make
 ```
 
-Python apps (stream-http, detect-http) require no compilation.
+Python apps (`stream-http`, `detect-http`, `control-v4l2`, `capture-pycamera2`) require no compilation.
 
 ## Dependencies
 
