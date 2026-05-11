@@ -138,7 +138,7 @@ function getColorForClass(className) {
 async function updateFrame() {
     try {
         const timestamp = Date.now();
-        const response = await fetch(`/frame?t=${timestamp}`);
+        const response = await fetch(`frame?t=${timestamp}`);
         if (!response.ok) throw new Error('Failed to fetch frame');
 
         const data = await response.json();
