@@ -44,7 +44,7 @@ static int v4l2_ioctl(int fd, int request, void *arg)
     return r;
 }
 
-static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned int width, unsigned int height, unsigned int pixfmt, unsigned int fps, unsigned int requested_planes)
+static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned int width, unsigned int height, unsigned int pixfmt, unsigned int fps, unsigned int requested_planes, unsigned int requested_buffers)
 {
     struct v4l2_capability cap;
     struct v4l2_format fmt;
@@ -129,7 +129,7 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
     }
 
     memset(&req, 0, sizeof(req));
-    req.count = V4L2_BUFFERS;
+    req.count = (requested_buffers > 0) ? requested_buffers : V4L2_BUFFERS;
     req.type = ctx->buf_type;
     req.memory = V4L2_MEMORY_MMAP;
 
@@ -137,6 +137,8 @@ static int v4l2_capture_open(v4l2_capture_t *ctx, const char *device, unsigned i
         log_perror("VIDIOC_REQBUFS");
         return -1;
     }
+
+    log_printf("V4L2: buffers=%u\n", req.count);
 
     ctx->buffers = calloc(req.count, sizeof(v4l2_buffer_t));
     ctx->n_buffers = req.count;

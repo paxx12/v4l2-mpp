@@ -68,6 +68,7 @@ static void print_usage(const char *prog)
     printf("  --h264-bitrate <kbps>   H264 bitrate in kbps (default: 2000)\n");
     printf("  --fps <fps>             Frames per second (default: 30)\n");
     printf("  --num-planes <n>        Number of capture planes (default: 1)\n");
+    printf("  --buffers <n>           Number of V4L2 capture buffers (default: 4)\n");
     printf("  --idle <ms>             Idle sleep in ms when no readers (default: 1000)\n");
     printf("  --debug                 Enable debug output\n");
     printf("  --help                  Show this help\n");
@@ -87,6 +88,7 @@ int main(int argc, char *argv[])
     int bitrate = 2000;
     int fps = 30;
     int num_planes = 1;
+    int buffers = 0;
     int idle_ms = 1000;
     int opt;
 
@@ -101,6 +103,7 @@ int main(int argc, char *argv[])
         OPT_BITRATE,
         OPT_FPS,
         OPT_NUM_PLANES,
+        OPT_BUFFERS,
         OPT_IDLE,
         OPT_DEBUG,
         OPT_HELP,
@@ -117,6 +120,7 @@ int main(int argc, char *argv[])
         {"h264-bitrate",  required_argument, 0, OPT_BITRATE},
         {"fps",           required_argument, 0, OPT_FPS},
         {"num-planes",    required_argument, 0, OPT_NUM_PLANES},
+        {"buffers",       required_argument, 0, OPT_BUFFERS},
         {"idle",          required_argument, 0, OPT_IDLE},
         {"debug",         no_argument,       0, OPT_DEBUG},
         {"help",          no_argument,       0, OPT_HELP},
@@ -155,6 +159,9 @@ int main(int argc, char *argv[])
         case OPT_NUM_PLANES:
             num_planes = atoi(optarg);
             break;
+        case OPT_BUFFERS:
+            buffers = atoi(optarg);
+            break;
         case OPT_IDLE:
             idle_ms = atoi(optarg);
             break;
@@ -188,7 +195,7 @@ int main(int argc, char *argv[])
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    if (v4l2_capture_open(&v4l2, device, width, height, V4L2_PIX_FMT_MJPEG, fps, num_planes) < 0) {
+    if (v4l2_capture_open(&v4l2, device, width, height, V4L2_PIX_FMT_MJPEG, fps, num_planes, buffers) < 0) {
         log_errorf( "Failed to open V4L2 device\n");
         return 1;
     }
