@@ -265,6 +265,7 @@ int main(int argc, char *argv[])
 
         void *frame_data = v4l2.buffers[buf.index].start[0];
         size_t bytesused = buf.bytesused;
+        size_t buf_capacity = v4l2.buffers[buf.index].length[0];
 
         sock_accept_clients(&jpeg_sock);
         sock_accept_clients(&mjpeg_sock);
@@ -289,7 +290,7 @@ int main(int argc, char *argv[])
         }
 
         if (h264_sock.num_clients > 0) {
-            MppFrame decoded = mpp_decode_jpeg(&mpp_dec, frame_data, bytesused);
+            MppFrame decoded = mpp_decode_jpeg(&mpp_dec, frame_data, bytesused, buf_capacity);
             if (decoded) {
                 MppPacket packet = mpp_encode_mppframe(&mpp_enc, decoded, h264_sock.need_keyframe);
                 if (packet) {
