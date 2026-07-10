@@ -9,6 +9,7 @@
 #include <rockchip/mpp_frame.h>
 #include <rockchip/mpp_packet.h>
 #include "log.h"
+#include "mpp_fmt_size.h"
 
 typedef struct {
     MppCtx ctx;
@@ -179,7 +180,7 @@ __attribute__((unused)) static MppPacket mpp_encode_frame(mpp_enc_ctx_t *ctx, vo
     size_t frame_size;
     void *frame_ptr;
 
-    frame_size = ctx->width * ctx->height * 3;
+    frame_size = mpp_fmt_frame_size(ctx->width, ctx->height, ctx->fmt);
 
     ret = mpp_buffer_get(ctx->buf_grp, &frame_buf, frame_size);
     if (ret != MPP_OK) {

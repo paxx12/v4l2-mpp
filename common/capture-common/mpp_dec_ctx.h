@@ -9,6 +9,7 @@
 #include <rockchip/mpp_frame.h>
 #include <rockchip/mpp_packet.h>
 #include "log.h"
+#include "mpp_fmt_size.h"
 
 typedef struct {
     MppCtx ctx;
@@ -91,7 +92,7 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
     unsigned int hor_stride = mpp_align_up(ctx->width, 16);
     unsigned int ver_stride = mpp_align_up(ctx->height, 16);
 
-    frame_size = hor_stride * ver_stride * 2;
+    frame_size = mpp_fmt_frame_size(hor_stride, ver_stride, ctx->format);
 
     ret = mpp_buffer_get(ctx->pkt_grp, &pkt_buf, size);
     if (ret != MPP_OK) {
