@@ -80,7 +80,7 @@ __attribute__((unused)) static int mpp_jpeg_decoder_init(mpp_dec_ctx_t *ctx, uns
     return 0;
 }
 
-__attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void *data, size_t size)
+__attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void *data, size_t size, size_t pkt_capacity)
 {
     MPP_RET ret;
     MppTask task = NULL;
@@ -94,7 +94,16 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
 
     frame_size = mpp_fmt_frame_size(hor_stride, ver_stride, ctx->format);
 
-    ret = mpp_buffer_get(ctx->pkt_grp, &pkt_buf, size);
+    /* Request the fixed V4L2 buffer capacity rather than the exact compressed
+     * size, which varies frame to frame with scene complexity. MPP's buffer
+     * group only reuses a free buffer if it is >= the requested size, so a
+     * varying request size causes free+realloc churn each time a frame beats
+     * the previous high-water mark. A constant request size lets it reuse the
+     * same ION buffer for every frame. */
+    if (pkt_capacity < size)
+        pkt_capacity = size;
+
+    ret = mpp_buffer_get(ctx->pkt_grp, &pkt_buf, pkt_capacity);
     if (ret != MPP_OK) {
         log_errorf("mpp_buffer_get pkt failed: %d\n", ret);
         return NULL;
