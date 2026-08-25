@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-PackageHomePage: https://github.com/paxx12/v4l2-mpp
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 @paxx12, @justinh-rahb
+
 APPS = stream-http detect-http detect-rknn-yolo11 control-v4l2
 APPS_DIR = apps
 
