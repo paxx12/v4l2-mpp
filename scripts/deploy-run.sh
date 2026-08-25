@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-PackageHomePage: https://github.com/paxx12/v4l2-mpp
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 @paxx12
 
 if [[ $# -lt 2 ]]; then
   echo "Usage: $0 <host> <cmd> [additional options]"

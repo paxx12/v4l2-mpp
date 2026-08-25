@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-PackageHomePage: https://github.com/paxx12/v4l2-mpp
+// SPDX-FileCopyrightText: Copyright (c) 2025 @paxx12
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>

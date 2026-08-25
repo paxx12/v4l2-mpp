@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-PackageHomePage: https://github.com/paxx12/v4l2-mpp
+# SPDX-FileCopyrightText: Copyright (c) 2026 @justinh-rahb
+
 TARGET = control-v4l2.py
 SRC = control-v4l2.py
 
