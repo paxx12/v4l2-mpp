@@ -261,7 +261,7 @@ static json handle_request(const json& request) {
             return {{"error", "failed to create offer"}};
         }
 
-        return {{"type", "offer"}, {"id", client->id}, {"sdp", std::string(*desc)}};
+        return {{"type", "offer"}, {"id", client->id}, {"sdp", std::string(*desc)}, {"iceServers", g_ice_servers}};
     }
 
     if (type == "answer") {
@@ -309,7 +309,7 @@ static json handle_request(const json& request) {
             return {{"error", "failed to create answer"}};
         }
 
-        return {{"type", "answer"}, {"id", client->id}, {"sdp", std::string(*desc)}};
+        return {{"type", "answer"}, {"id", client->id}, {"sdp", std::string(*desc)}, {"iceServers", g_ice_servers}};
     }
 
     if (type == "remote_candidate") {
