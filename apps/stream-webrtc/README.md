@@ -9,5 +9,6 @@ Connects to an H264 stream via Unix socket and serves it to WebRTC clients using
 - WebRTC peer connections with H264 video track
 - RTP packetization with RTCP feedback (SR, NACK)
 - Configurable STUN/ICE servers
+- Configurable MTU (`--mtu`) for VPN or tunnel links below 1280 bytes
 - Multiple concurrent client support
 - Keepalive ping/pong over data channel

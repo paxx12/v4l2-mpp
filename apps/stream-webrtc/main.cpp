@@ -61,6 +61,7 @@ static std::atomic<uint64_t> g_client_counter{0};
 static std::string g_h264_sock;
 static std::vector<std::string> g_ice_servers;
 static int g_max_clients = 4;
+static int g_mtu = 0;
 
 static std::shared_ptr<Client> find_client(const std::string& id) {
     std::lock_guard<std::mutex> lock(g_clients_mutex);
@@ -182,6 +183,9 @@ static std::shared_ptr<Client> create_client(const json& request) {
     for (const auto& server : g_ice_servers) {
         config.iceServers.emplace_back(server);
     }
+    if (g_mtu > 0) {
+        config.mtu = g_mtu;
+    }
 
     client->pc = std::make_shared<rtc::PeerConnection>(config);
 
@@ -204,8 +208,12 @@ static std::shared_ptr<Client> create_client(const json& request) {
     client->rtp_config = std::make_shared<rtc::RtpPacketizationConfig>(
         1, "video-stream", 96, rtc::H264RtpPacketizer::ClockRate);
 
+    // Same headroom as RTC_DEFAULT_MAX_FRAGMENT_SIZE: SRTP (12) + UDP (8) + IPv6 (40)
+    size_t max_fragment_size = g_mtu > 0
+        ? static_cast<size_t>(g_mtu - 12 - 8 - 40)
+        : rtc::H264RtpPacketizer::DefaultMaxFragmentSize;
     auto packetizer = std::make_shared<rtc::H264RtpPacketizer>(
-        rtc::NalUnit::Separator::LongStartSequence, client->rtp_config);
+        rtc::NalUnit::Separator::LongStartSequence, client->rtp_config, max_fragment_size);
 
     client->sr_reporter = std::make_shared<rtc::RtcpSrReporter>(client->rtp_config);
     packetizer->addToChain(client->sr_reporter);
@@ -396,6 +404,7 @@ static void print_usage(const char* prog) {
     printf("  --h264-sock <path>     H264 stream input socket\n");
     printf("  --max-clients <n>      Max concurrent clients (default: 4)\n");
     printf("  --stun <url>           STUN server URL (can be repeated)\n");
+    printf("  --mtu <bytes>          Max packet size, for links below 1280 (default: 1280)\n");
     printf("  --debug                Enable debug output\n");
     printf("  --help                 Show this help\n");
 }
@@ -410,6 +419,7 @@ int main(int argc, char* argv[]) {
         OPT_H264_SOCK,
         OPT_MAX_CLIENTS,
         OPT_STUN,
+        OPT_MTU,
         OPT_DEBUG,
         OPT_HELP,
     };
@@ -419,6 +429,7 @@ int main(int argc, char* argv[]) {
         {"h264-sock",    required_argument, 0, OPT_H264_SOCK},
         {"max-clients",  required_argument, 0, OPT_MAX_CLIENTS},
         {"stun",         required_argument, 0, OPT_STUN},
+        {"mtu",          required_argument, 0, OPT_MTU},
         {"debug",        no_argument,       0, OPT_DEBUG},
         {"help",         no_argument,       0, OPT_HELP},
         {0, 0, 0, 0}
@@ -439,6 +450,9 @@ int main(int argc, char* argv[]) {
         case OPT_STUN:
             g_ice_servers.push_back(optarg);
             break;
+        case OPT_MTU:
+            g_mtu = std::atoi(optarg);
+            break;
         case OPT_DEBUG:
             g_debug = 1;
             break;
@@ -457,6 +471,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if (g_mtu != 0 && (g_mtu < 576 || g_mtu > 9000)) {
+        log_errorf("Error: --mtu must be between 576 and 9000\n");
+        return 1;
+    }
+
     if (g_ice_servers.empty()) {
         g_ice_servers.push_back("stun:stun.l.google.com:19302");
     }
@@ -468,6 +487,9 @@ int main(int argc, char* argv[]) {
     log_printf("WebRTC socket: %s\n", webrtc_sock.c_str());
     log_printf("H264 socket: %s\n", g_h264_sock.c_str());
     log_printf("Max clients: %d\n", g_max_clients);
+    if (g_mtu > 0) {
+        log_printf("MTU: %d\n", g_mtu);
+    }
 
     unlink(webrtc_sock.c_str());
 
