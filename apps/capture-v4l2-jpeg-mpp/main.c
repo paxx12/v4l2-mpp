@@ -271,9 +271,9 @@ int main(int argc, char *argv[])
         size_t bytesused = buf.bytesused;
         size_t buf_capacity = v4l2.buffers[buf.index].length[0];
 
-        sock_accept_clients(&jpeg_sock);
-        sock_accept_clients(&mjpeg_sock);
-        sock_accept_clients(&h264_sock);
+        sock_accept_clients(&jpeg_sock, 0);
+        sock_accept_clients(&mjpeg_sock, 0);
+        sock_accept_clients(&h264_sock, 0);
 
         callback_chain_t jpeg_chain[] = {
             { write_output_rename_cb, (void*)jpeg_output, jpeg_output != NULL },

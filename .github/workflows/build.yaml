@@ -28,6 +28,9 @@ jobs:
         sudo apt-get install -y build-essential cmake \
           gcc-aarch64-linux-gnu pkg-config
 
+    - name: Test common helpers
+      run: make test
+
     - name: Compile dependencies
       run: make deps
 

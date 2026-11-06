@@ -23,7 +23,7 @@ else
 $(warning "libliveMedia not compiled. Run ./deps/compile_livemedia.sh to compile it.")
 endif
 
-.PHONY: all clean install uninstall deps $(APPS)
+.PHONY: all clean install uninstall deps test $(APPS)
 
 all: $(APPS)
 
@@ -35,7 +35,11 @@ deps:
 	deps/compile_libdatachannel.sh
 	deps/compile_livemedia.sh
 
+test:
+	$(MAKE) -C tests check
+
 clean:
+	$(MAKE) -C tests clean
 	@for app in $(APPS); do \
 		$(MAKE) -C $(APPS_DIR)/$$app clean; \
 	done
