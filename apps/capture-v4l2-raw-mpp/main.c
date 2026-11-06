@@ -336,10 +336,10 @@ int main(int argc, char *argv[])
             ? planes[0].bytesused : buf.bytesused;
         void *frame_data = v4l2.buffers[buf.index].start[0];
 
-        sock_accept_clients(&jpeg_sock);
-        sock_accept_clients(&mjpeg_sock);
-        sock_accept_clients(&h264_sock);
-        sock_accept_clients(&raw_frame_sock);
+        sock_accept_clients(&jpeg_sock, 0);
+        sock_accept_clients(&mjpeg_sock, 0);
+        sock_accept_clients(&h264_sock, 0);
+        sock_accept_clients(&raw_frame_sock, 0);
 
         callback_chain_t jpeg_chain[] = {
             { write_output_rename_cb, (void*)jpeg_output, jpeg_output != NULL },

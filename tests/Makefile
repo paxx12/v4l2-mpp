@@ -4,8 +4,8 @@
 
 CC ?= gcc
 CXX ?= g++
-CFLAGS ?= -Wall -Wextra -Werror -O2
-CXXFLAGS ?= -Wall -Wextra -Werror -O2 -std=c++17
+CFLAGS ?= -Wall -Wextra -Werror -Wno-unused-function -O2
+CXXFLAGS ?= -Wall -Wextra -Werror -Wno-unused-function -O2 -std=c++17
 CPPFLAGS += -I../common -I../common/capture-common -I../common/stream-common
 
 all: test-common test-h264-cpp

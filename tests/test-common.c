@@ -74,12 +74,18 @@ static void test_socket_cloexec(void)
     struct sockaddr_un addr = { .sun_family = AF_UNIX };
     strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
     assert(connect(client, (struct sockaddr *)&addr, sizeof(addr)) == 0);
-    assert(sock_accept_clients(&ctx));
+    assert(sock_accept_clients(&ctx, 4096));
     assert(ctx.num_clients == 1);
 
     for (int i = 0; i < SOCK_MAX_CLIENTS; i++) {
-        if (ctx.clients[i].fd >= 0)
+        if (ctx.clients[i].fd >= 0) {
             assert_cloexec(ctx.clients[i].fd);
+            int sndbuf_size = 0;
+            socklen_t sndbuf_len = sizeof(sndbuf_size);
+            assert(getsockopt(ctx.clients[i].fd, SOL_SOCKET, SO_SNDBUF,
+                              &sndbuf_size, &sndbuf_len) == 0);
+            assert(sndbuf_size >= 4096);
+        }
     }
 
     close(client);

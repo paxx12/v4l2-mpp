@@ -104,7 +104,7 @@ static void sock_close(sock_ctx_t *ctx)
     }
 }
 
-static bool sock_accept_clients(sock_ctx_t *ctx)
+static bool sock_accept_clients(sock_ctx_t *ctx, int sndbuf_size)
 {
     if (ctx->listen_fd < 0)
         return false;
@@ -129,6 +129,13 @@ static bool sock_accept_clients(sock_ctx_t *ctx)
 
         int flags = fcntl(client_fd, F_GETFL, 0);
         fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
+
+        if (sndbuf_size > 0) {
+            if (setsockopt(client_fd, SOL_SOCKET, SO_SNDBUFFORCE,
+                           &sndbuf_size, sizeof(sndbuf_size)) < 0)
+                setsockopt(client_fd, SOL_SOCKET, SO_SNDBUF,
+                           &sndbuf_size, sizeof(sndbuf_size));
+        }
 
         sock_client_t *slot = NULL;
         for (int i = 0; i < SOCK_MAX_CLIENTS; i++) {
