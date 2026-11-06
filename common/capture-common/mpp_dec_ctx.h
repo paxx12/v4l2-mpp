@@ -92,6 +92,7 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
     MppBuffer frm_buf = NULL;
     MppPacket packet = NULL;
     MppFrame frame = NULL;
+    int submitted = 0;
     size_t frame_size;
     unsigned int hor_stride = mpp_align_up(ctx->width, 16);
     unsigned int ver_stride = mpp_align_up(ctx->height, 16);
@@ -166,6 +167,10 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
         log_errorf("enqueue input failed: %d\n", ret);
         goto error;
     }
+    /* From here on the packet/frame/buffers are owned by the decoder via the
+     * task metas; freeing them without resetting the decoder first would let
+     * the hardware touch already-returned memory. */
+    submitted = 1;
 
     ret = ctx->mpi->poll(ctx->ctx, MPP_PORT_OUTPUT, MPP_POLL_BLOCK);
     if (ret != MPP_OK) {
@@ -185,6 +190,9 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
     ret = ctx->mpi->enqueue(ctx->ctx, MPP_PORT_OUTPUT, task);
     if (ret != MPP_OK) {
         log_errorf("enqueue output failed: %d\n", ret);
+        /* The output task slot was never handed back; without a reset the
+         * port eventually deadlocks on MPP_POLL_BLOCK. */
+        goto error;
     }
 
     mpp_packet_deinit(&packet);
@@ -194,6 +202,13 @@ __attribute__((unused)) static MppFrame mpp_decode_jpeg(mpp_dec_ctx_t *ctx, void
     return output_frame;
 
 error:
+    /* If the input task was already submitted, the decoder may still be
+     * reading the packet or writing the frame buffers: reset first so MPP
+     * releases the in-flight task (and its metas) before we drop our own
+     * references. */
+    if (submitted) {
+        ctx->mpi->reset(ctx->ctx);
+    }
     if (frame) mpp_frame_deinit(&frame);
     if (packet) mpp_packet_deinit(&packet);
     if (pkt_buf) mpp_buffer_put(pkt_buf);
