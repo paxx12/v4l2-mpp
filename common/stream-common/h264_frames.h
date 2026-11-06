@@ -45,7 +45,11 @@ static const uint8_t *h264_process_frames(const uint8_t *data, const uint8_t *en
         }
 
         const uint8_t* next = start;
-        bool found_slice = false;
+        /* The scan below only looks at NALs after `start`; when the frame
+         * itself begins with a first slice (no SPS/PPS/AUD prefix, the normal
+         * case for non-IDR frames from MPP), that first slice must count as
+         * the frame boundary trigger or two access units get merged. */
+        bool found_slice = h264_is_new_frame(start, end - start);
 
         while ((next = h264_find_nal(next + 4, end - next - 4)) != nullptr) {
             if (h264_is_aud_frame(next, end - next)) {
