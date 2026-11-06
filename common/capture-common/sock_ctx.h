@@ -51,7 +51,7 @@ static int sock_open(sock_ctx_t *ctx, const char *path)
 
     unlink(path);
 
-    ctx->listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    ctx->listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (ctx->listen_fd < 0) {
         log_perror("socket");
         return -1;
@@ -118,6 +118,13 @@ static bool sock_accept_clients(sock_ctx_t *ctx)
                 break;
             log_perror("accept");
             break;
+        }
+
+        int fd_flags = fcntl(client_fd, F_GETFD, 0);
+        if (fd_flags < 0 || fcntl(client_fd, F_SETFD, fd_flags | FD_CLOEXEC) < 0) {
+            log_perror("fcntl(FD_CLOEXEC)");
+            close(client_fd);
+            continue;
         }
 
         int flags = fcntl(client_fd, F_GETFL, 0);
